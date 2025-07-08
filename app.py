@@ -8,25 +8,14 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 # Инициализация OpenAI
-openai.api_key = OPENAI_API_KEY
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Привет! Я бот с ChatGPT 3.5. Отправь мне сообщение, и я отвечу.')
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """
-    Доступные команды:
-    /start - Начать диалог
-    /help - Получить помощь
-    Просто напиши сообщение, и я отвечу!
-    """
-    await update.message.reply_text(help_text)
+import openai
+from openai import OpenAIError
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
+    logger.info(f"User message: {user_message}")
     
     try:
-        # Отправляем запрос к ChatGPT 3.5
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -35,10 +24,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ],
             temperature=0.7
         )
-        
         bot_response = response.choices[0].message['content']
+    
+    except openai.error.AuthenticationError:
+        bot_response = "Ошибка: неверный API-ключ OpenAI. Проверьте настройки бота."
+        logger.error("Invalid OpenAI API key")
+    
+    except openai.error.RateLimitError:
+        bot_response = "Превышен лимит запросов. Попробуйте позже."
+        logger.error("OpenAI rate limit exceeded")
+    
+    except openai.error.APIError as e:
+        bot_response = f"Ошибка API OpenAI: {e}"
+        logger.error(f"OpenAI API error: {e}")
+    
     except Exception as e:
-        bot_response = f"Произошла ошибка: {str(e)}"
+        bot_response = "Произошла неизвестная ошибка."
+        logger.error(f"Unexpected error: {e}")
     
     await update.message.reply_text(bot_response)
 
