@@ -31,11 +31,9 @@ if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
 openai.api_key = OPENAI_API_KEY
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
     await update.message.reply_text('Привет! Я бот с ChatGPT 3.5. Отправь мне сообщение, и я отвечу.')
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /help"""
     help_text = """
     Доступные команды:
     /start - Начать диалог
@@ -45,7 +43,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текстовых сообщений"""
     user_message = update.message.text
     logger.info(f"User message: {user_message}")
     
@@ -76,43 +73,4 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_response = "Произошла неизвестная ошибка."
         logger.error(f"Unexpected error: {e}")
     
-    await update.message.reply_text(bot_response)
-
-async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ошибок"""
-    logger.error(f'Update {update} caused error {context.error}')
-
-async def check_telegram_connection():
-    """Проверка подключения к Telegram API"""
-    try:
-        await app.bot.get_me()
-        logger.info("Успешно подключено к Telegram API")
-    except Exception as e:
-        logger.error(f"Ошибка подключения к Telegram API: {e}")
-        raise
-
-if __name__ == '__main__':
-    logger.info('Starting bot...')
-    
-    try:
-        app = Application.builder().token(TELEGRAM_TOKEN).build()
-        
-        # Команды
-        app.add_handler(CommandHandler('start', start_command))
-        app.add_handler(CommandHandler('help', help_command))
-        
-        # Сообщения
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        
-        # Ошибки
-        app.add_error_handler(error)
-        
-        logger.info('Polling...')
-        app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            timeout=30,
-            connect_timeout=10,
-            pool_timeout=10
-        )
-    except Exception as e:  # Этот блок обязателен!
-        logger.error(f"Failed to start bot: {e}")
+    await update.message.
