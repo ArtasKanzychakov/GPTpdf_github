@@ -92,13 +92,10 @@ async def check_telegram_connection():
         raise
 
 if __name__ == '__main__':
-    logger.info('Запуск бота...')
+    logger.info('Starting bot...')
     
     try:
         app = Application.builder().token(TELEGRAM_TOKEN).build()
-        
-        # Проверка подключения к Telegram
-        await check_telegram_connection()
         
         # Команды
         app.add_handler(CommandHandler('start', start_command))
@@ -110,4 +107,12 @@ if __name__ == '__main__':
         # Ошибки
         app.add_error_handler(error)
         
-        logger.info('Начало опроса Telegram API...')
+        logger.info('Polling...')
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            timeout=30,
+            connect_timeout=10,
+            pool_timeout=10
+        )
+    except Exception as e:  # Этот блок обязателен!
+        logger.error(f"Failed to start bot: {e}")
