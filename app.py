@@ -2,8 +2,8 @@ import os
 import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import openai
-from openai.error import AuthenticationError, RateLimitError, APIError
+import requests
+from requests.exceptions import RequestException
 
 # Настройка логирования
 logging.basicConfig(
@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 # Конфигурация
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"  # Уточните URL в документации
+
 
 # Проверка переменных окружения
 if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
@@ -41,15 +43,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User message: {user_message}")
     
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "model": "deepseek-chat",  # Уточните актуальную модель
+            "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": user_message}
             ],
-            temperature=0.7
-        )
-        bot_response = response.choices[0].message['content']
+            "temperature": 0.7
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=data)
+        response.raise_for_status()  # Проверка на ошибки
+        
+        bot_response = response.json()['choices'][0]['message']['content']
+    
+    except RequestException as e:
+        bot_response = f"Ошибка подключения к DeepSeek: {str(e)}"
+        logger.error(f"DeepSeek API error: {e}")
+    
+    except Exception as e:
+        bot_response = "Произошла неизвестная ошибка."
+        logger.error(f"Unexpected error: {e}")
+    
+    await update.message.reply_text(bot_response)
     
     except AuthenticationError:
         bot_response = "Ошибка: неверный API-ключ OpenAI. Проверьте настройки бота."
