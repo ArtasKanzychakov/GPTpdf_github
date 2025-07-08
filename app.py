@@ -3,7 +3,13 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import openai
-from openai import OpenAIError
+
+# Корректный импорт исключений OpenAI
+from openai.error import (
+    AuthenticationError,
+    RateLimitError,
+    APIError
+)
 
 # Настройка логирования
 logging.basicConfig(
@@ -18,8 +24,8 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 # Проверка переменных окружения
 if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
-    logger.error("Не заданы TELEGRAM_BOT_TOKEN или OPENAI_API_KEY!")
-    exit(1)
+    logger.critical("Не заданы TELEGRAM_BOT_TOKEN или OPENAI_API_KEY!")
+    raise ValueError("TELEGRAM_BOT_TOKEN и OPENAI_API_KEY должны быть установлены")
 
 # Инициализация OpenAI
 openai.api_key = OPENAI_API_KEY
@@ -54,15 +60,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         bot_response = response.choices[0].message['content']
     
-    except openai.error.AuthenticationError:
+    except AuthenticationError:
         bot_response = "Ошибка: неверный API-ключ OpenAI. Проверьте настройки бота."
         logger.error("Invalid OpenAI API key")
     
-    except openai.error.RateLimitError:
+    except RateLimitError:
         bot_response = "Превышен лимит запросов. Попробуйте позже."
         logger.error("OpenAI rate limit exceeded")
     
-    except openai.error.APIError as e:
+    except APIError as e:
         bot_response = f"Ошибка API OpenAI: {e}"
         logger.error(f"OpenAI API error: {e}")
     
@@ -76,11 +82,23 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок"""
     logger.error(f'Update {update} caused error {context.error}')
 
+async def check_telegram_connection():
+    """Проверка подключения к Telegram API"""
+    try:
+        await app.bot.get_me()
+        logger.info("Успешно подключено к Telegram API")
+    except Exception as e:
+        logger.error(f"Ошибка подключения к Telegram API: {e}")
+        raise
+
 if __name__ == '__main__':
-    logger.info('Starting bot...')
+    logger.info('Запуск бота...')
     
     try:
         app = Application.builder().token(TELEGRAM_TOKEN).build()
+        
+        # Проверка подключения к Telegram
+        await check_telegram_connection()
         
         # Команды
         app.add_handler(CommandHandler('start', start_command))
@@ -92,12 +110,4 @@ if __name__ == '__main__':
         # Ошибки
         app.add_error_handler(error)
         
-        logger.info('Polling...')
-        app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            timeout=30,
-            connect_timeout=10,
-            pool_timeout=10
-        )
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
+        logger.info('Начало опроса Telegram API...')
