@@ -46,6 +46,7 @@ QUESTIONS = {
 REPLY_KEYBOARD = [["С людьми", "С данными"]]
 REPLY_MARKUP = ReplyKeyboardMarkup(REPLY_KEYBOARD, one_time_keyboard=True, resize_keyboard=True)
 
+# Команды и обработчики
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начинает диалог с пользователем."""
     await update.message.reply_text(
@@ -54,15 +55,34 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=REPLY_MARKUP
     )
     await update.message.reply_text(QUESTIONS[GET_QUESTION_1])
-    # Сохраняем ответы пользователя в user_data
     context.user_data['answers'] = {}
     return GET_QUESTION_1
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет сообщение-помощь, когда пользователь отправляет команду /help."""
+    help_text = (
+        "Привет! Я бот для поиска бизнес-ниш.\n\n"
+        "Доступные команды:\n"
+        "/start - Начать анкету для подбора ниши.\n"
+        "/cancel - Отменить текущую анкету.\n"
+        "/reset - Сбросить анкету и начать заново.\n"
+        "/help - Показать это сообщение."
+    )
+    await update.message.reply_text(help_text)
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сбрасывает анкету."""
     await update.message.reply_text('Анкета сброшена. Чтобы начать заново, используйте команду /start.')
     return ConversationHandler.END
 
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отменяет диалог."""
+    await update.message.reply_text(
+        "Диалог отменен. Чтобы начать заново, используйте команду /start."
+    )
+    return ConversationHandler.END
+
+# Обработчики состояний ConversationHandler
 async def get_q1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает ответ на первый вопрос и задает второй."""
     user_answer = update.message.text
@@ -113,13 +133,7 @@ async def get_q2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Завершаем диалог
     return ConversationHandler.END
 
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет диалог."""
-    await update.message.reply_text(
-        "Диалог отменен. Чтобы начать заново, используйте команду /start."
-    )
-    return ConversationHandler.END
-
+# Обработчик ошибок
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Логирует ошибки."""
     logger.error(f'Update {update} caused error {context.error}')
@@ -150,7 +164,6 @@ def main():
 
         app.add_handler(conv_handler)
         app.add_handler(CommandHandler('help', help_command))
-        app.add_handler(CommandHandler('reset', reset_command))
         app.add_error_handler(error)
 
         logger.info('Polling...')
