@@ -307,6 +307,10 @@ async def create_and_send_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Error creating/sending PDF: {e}")
         await update.message.reply_text("Произошла ошибка при создании PDF-файла.")
 
+async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Логирует ошибки."""
+    logger.error(f'Update {update} caused error {context.error}')
+
 def main():
     """Запускает бота."""
     logger.info('Starting bot...')
