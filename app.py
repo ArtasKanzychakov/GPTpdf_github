@@ -186,6 +186,8 @@ async def handle_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if context.user_data['question_index'] < len(QUIZ_QUESTIONS):
         return await ask_question(update, context)
     else:
+        await update.message.reply_chat_action("typing")
+        
         await update.message.reply_text("Спасибо! Анкета завершена. "
                                         "Сейчас я проанализирую ваши ответы и сгенерирую 10 бизнес-ниш...",
                                         reply_markup=ReplyKeyboardRemove())
@@ -230,6 +232,8 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
     """Обрабатывает выбор ниши и генерирует бизнес-план."""
     selected_niche = update.message.text
     context.user_data['selected_niche'] = selected_niche
+    
+    await update.message.reply_chat_action("typing")
     
     await update.message.reply_text(f"Отлично! Вы выбрали: **{selected_niche}**\n\n"
                                     "Готовлю подробный бизнес-план. Это займет некоторое время...",
