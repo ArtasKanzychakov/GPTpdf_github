@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Конфигурация
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-OPENAI_MODEL = "gpt-3.5-turbo" # Или "gpt-4", если у вас есть доступ
+OPENAI_MODEL = "gpt-3.5-turbo"
 
 # Проверка переменных окружения
 if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
@@ -315,38 +315,37 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Логирует ошибки."""
     logger.error(f'Update {update} caused error {context.error}')
 
-def main():
-    """Запускает бота."""
-    logger.info('Starting bot...')
-    try:
-        app = Application.builder().token(TELEGRAM_TOKEN).build()
-        
-        # Определяем состояния для каждого вопроса
-        quiz_states_dict = {i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)] for i in range(len(QUIZ_QUESTIONS))}
-        
-        conv_handler = ConversationHandler(
-            entry_points=[CommandHandler('start', start_command)],
-            states={
-                # Начальное состояние для первого вопроса
-                0: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)],
-                # Остальные состояния для вопросов (от 1 до 19)
-                **quiz_states_dict,
-                # Состояние для выбора ниши
-                len(QUIZ_QUESTIONS): [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_niche_selection)],
-            },
-            fallbacks=[CommandHandler('cancel', cancel_command), CommandHandler('reset', reset_command)],
-        )
+def main() -> None:
+    """Запускает бота с вебхуком для Production."""
+    PORT = int(os.environ.get('PORT', 8443))
+    
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # Определяем состояния для каждого вопроса
+    quiz_states_dict = {i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)] for i in range(len(QUIZ_QUESTIONS))}
+    
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start_command)],
+        states={
+            0: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)],
+            **quiz_states_dict,
+            len(QUIZ_QUESTIONS): [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_niche_selection)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel_command), CommandHandler('reset', reset_command)],
+    )
 
-        app.add_handler(conv_handler)
-        app.add_handler(CommandHandler('help', help_command))
-        app.add_error_handler(error)
-        app.add_handler(CommandHandler('reset', reset_command))
+    app.add_handler(conv_handler)
+    app.add_handler(CommandHandler('help', help_command))
+    app.add_error_handler(error)
+    app.add_handler(CommandHandler('reset', reset_command))
 
-        logger.info('Polling...')
-        app.run_polling()
-
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
+    # Запускаем бота с вебхуком
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=f"https://gptpdf-github-vybor-nishy.onrender.com/{TELEGRAM_TOKEN}"
+    )
 
 if __name__ == '__main__':
     main()
