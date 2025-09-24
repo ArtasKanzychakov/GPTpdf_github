@@ -1,10 +1,17 @@
 import os
 import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    ConversationHandler
+)
 import openai
 from openai import OpenAI
-import httpx # Рекомендуется для асинхронных запросов в `python-telegram-bot`
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 # Настройка логирования
 logging.basicConfig(
@@ -26,56 +33,95 @@ if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
 # Инициализация OpenAI клиента
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Определяем состояния для ConversationHandler
+GET_QUESTION_1, GET_QUESTION_2, GENERATE_NICHES = range(3)
+
+# Тексты вопросов и кнопки
+QUESTIONS = {
+    GET_QUESTION_1: "Вопрос 1: Что вам больше нравится? Работа с людьми или работа с данными? (Ответьте: 'С людьми' или 'С данными')",
+    GET_QUESTION_2: "Вопрос 2: Какими тремя словами вы бы описали свои основные интересы и увлечения? (Например: 'творчество, спорт, технологии')"
+}
+
+# Отвечать на эти вопросы с помощью кнопок
+REPLY_KEYBOARD = [["С людьми", "С данными"]]
+REPLY_MARKUP = ReplyKeyboardMarkup(REPLY_KEYBOARD, one_time_keyboard=True, resize_keyboard=True)
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет приветственное сообщение и начинает анкету."""
-    await update.message.reply_text('Привет! Я помогу тебе найти нишу для бизнеса. Давай начнём анкету. Напиши "Начать", чтобы продолжить.')
+    """Начинает диалог с пользователем."""
+    await update.message.reply_text(
+        "Привет! Я помогу тебе найти нишу для бизнеса. Давай начнём анкету. "
+        "Пожалуйста, ответь на первый вопрос, используя кнопки ниже:",
+        reply_markup=REPLY_MARKUP
+    )
+    await update.message.reply_text(QUESTIONS[GET_QUESTION_1])
+    # Сохраняем ответы пользователя в user_data
+    context.user_data['answers'] = {}
+    return GET_QUESTION_1
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отправляет справочное сообщение."""
-    help_text = """
-    Доступные команды:
-    /start - Начать анкету
-    /help - Получить помощь
-    /reset - Сбросить анкету
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сбрасывает анкету."""
+    await update.message.reply_text('Анкета сброшена. Чтобы начать заново, используйте команду /start.')
+    return ConversationHandler.END
+
+async def get_q1(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает ответ на первый вопрос и задает второй."""
+    user_answer = update.message.text
+    context.user_data['answers']['q1'] = user_answer
+    logger.info(f"Answer to Q1: {user_answer}")
+
+    await update.message.reply_text(
+        "Спасибо! Теперь ответьте на следующий вопрос.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    await update.message.reply_text(QUESTIONS[GET_QUESTION_2])
+
+    return GET_QUESTION_2
+
+async def get_q2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает ответ на второй вопрос и переходит к генерации."""
+    user_answer = update.message.text
+    context.user_data['answers']['q2'] = user_answer
+    logger.info(f"Answer to Q2: {user_answer}")
+
+    await update.message.reply_text("Отлично! Ваши ответы собраны. Сейчас я сгенерирую для вас 10 бизнес-ниш...")
+    
+    # Формируем промпт для OpenAI
+    answers = context.user_data['answers']
+    prompt = f"""
+    На основе следующих ответов пользователя, предложи 10 креативных идей для бизнес-ниш:
+    - Вопрос 1 (что нравится): {answers.get('q1')}
+    - Вопрос 2 (основные интересы): {answers.get('q2')}
+    
+    Сформируй промпт для ChatGPT, который будет предлагать 10 ниш, учитывая наклонности пользователя.
     """
-    await update.message.reply_text(help_text)
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает текстовые сообщения пользователя."""
-    user_message = update.message.text
-    logger.info(f"User message: {user_message}")
-
-    # В этой части будет логика анкеты
-    # Сейчас она просто отправляет сообщение в OpenAI
-    await update.message.reply_text("Спасибо за ваше сообщение! Я пока не готов отвечать, но скоро эта функция появится. Пока вы можете пообщаться со мной.")
-
+    
     try:
         completion = openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": user_message}
+                {"role": "system", "content": "Ты - опытный бизнес-консультант, специализирующийся на поиске уникальных ниш."},
+                {"role": "user", "content": prompt}
             ]
         )
         bot_response = completion.choices[0].message.content
+        await update.message.reply_text(bot_response)
 
-    except openai.APIError as e:
-        logger.error(f"OpenAI API error: {e}")
-        bot_response = "Произошла ошибка при обращении к OpenAI API. Пожалуйста, попробуйте позже."
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error with OpenAI API: {e}")
-        if e.response.status_code == 401:
-            bot_response = "Ошибка: неверный API-ключ OpenAI. Проверьте настройки бота."
-        else:
-            bot_response = "Произошла ошибка при обращении к API. Пожалуйста, попробуйте позже."
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        bot_response = "Произошла неизвестная ошибка."
+        logger.error(f"Error calling OpenAI API: {e}")
+        await update.message.reply_text("Произошла ошибка при обращении к AI. Попробуйте позже.")
 
-    await update.message.reply_text(bot_response)
+    # Завершаем диалог
+    return ConversationHandler.END
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отменяет диалог."""
+    await update.message.reply_text(
+        "Диалог отменен. Чтобы начать заново, используйте команду /start."
+    )
+    return ConversationHandler.END
 
 async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Логирует ошибки, вызванные обновлениями."""
+    """Логирует ошибки."""
     logger.error(f'Update {update} caused error {context.error}')
 
 def main():
@@ -84,14 +130,32 @@ def main():
     try:
         app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-        # Добавляем обработчики
-        app.add_handler(CommandHandler('start', start_command))
+        # Создаем обработчик для диалога
+        conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('start', start_command)],
+            states={
+                GET_QUESTION_1: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND, get_q1
+                    )
+                ],
+                GET_QUESTION_2: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND, get_q2
+                    )
+                ],
+            },
+            fallbacks=[CommandHandler('cancel', cancel_command), CommandHandler('reset', reset_command)],
+        )
+
+        app.add_handler(conv_handler)
         app.add_handler(CommandHandler('help', help_command))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        app.add_handler(CommandHandler('reset', reset_command))
         app.add_error_handler(error)
 
         logger.info('Polling...')
-        app.run_polling(poll_interval=1.0)
+        app.run_polling()
+
     except Exception as e:
         logger.error(f"Failed to start bot: {e}")
 
