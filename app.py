@@ -264,3 +264,52 @@ def main():
 
 if __name__ == '__main__':
     # ... (Оставить без изменений)
+
+# app.py
+
+# ... (ваш существующий код)
+
+async def create_and_send_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Создает PDF-файл и отправляет его пользователю."""
+    try:
+        # Регистрируем шрифт для поддержки кириллицы
+        # Замените 'Vera' на 'DejaVuSans'
+        pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
+        
+        # Создаем буфер в памяти
+        buffer = io.BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4)
+        
+        # Устанавливаем шрифт для всего документа
+        c.setFont('DejaVuSans', 12)
+        
+        # Добавляем содержимое в PDF
+        textobject = c.beginText()
+        textobject.setTextOrigin(10, 800)
+        
+        # Устанавливаем шрифт для заголовка
+        textobject.setFont('DejaVuSans', 16)
+        textobject.textLine(f"Бизнес-план: {context.user_data['selected_niche']}")
+        textobject.textLine("") # Пустая строка
+        
+        # Добавляем текст плана
+        c.drawString(10, 780, context.user_data['business_plan'])
+        
+        c.showPage()
+        c.save()
+        
+        buffer.seek(0)
+        
+        # Отправляем файл
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=buffer,
+            filename=f"Бизнес-план_{context.user_data['selected_niche']}.pdf",
+            caption="Ваш подробный бизнес-план готов! Вы можете скачать его в формате PDF."
+        )
+        
+        buffer.close()
+        
+    except Exception as e:
+        logger.error(f"Error creating/sending PDF: {e}")
+        await update.message.reply_text("Произошла ошибка при создании PDF-файла.")
