@@ -39,7 +39,6 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Определяем состояния для ConversationHandler
 START, *QUESTIONS_STATES, GENERATE_NICHES, NICHE_SELECTION, GENERATE_PLAN = range(23)
-# 20 вопросов + 3 дополнительных состояния
 
 # Вопросы и кнопки-ответы
 QUIZ_QUESTIONS = [
@@ -173,7 +172,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(question_data["text"], reply_markup=keyboard)
 
-    return QUESTIONS_STATES[q_index]
+    return q_index
 
 async def handle_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обрабатывает ответ на вопрос."""
@@ -285,8 +284,8 @@ async def create_and_send_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE
         y_position = 800
         for line in lines:
             c.drawString(10, y_position, line)
-            y_position -= 14  # Adjust line spacing
-            if y_position < 50: # Check if a new page is needed
+            y_position -= 14
+            if y_position < 50:
                 c.showPage()
                 y_position = 800
                 c.setFont('DejaVuSans', 12)
@@ -314,11 +313,18 @@ def main():
     try:
         app = Application.builder().token(TELEGRAM_TOKEN).build()
         
+        # Определяем состояния для каждого вопроса
+        quiz_states_dict = {i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)] for i in range(len(QUIZ_QUESTIONS))}
+        
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler('start', start_command)],
             states={
-                **{QUESTIONS_STATES[i]: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)] for i in range(len(QUIZ_QUESTIONS))},
-                NICHE_SELECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_niche_selection)],
+                # Начальное состояние для первого вопроса
+                0: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)],
+                # Остальные состояния для вопросов (от 1 до 19)
+                **quiz_states_dict,
+                # Состояние для выбора ниши
+                len(QUIZ_QUESTIONS): [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_niche_selection)],
             },
             fallbacks=[CommandHandler('cancel', cancel_command), CommandHandler('reset', reset_command)],
         )
