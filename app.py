@@ -38,7 +38,8 @@ if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Определяем состояния для ConversationHandler
-START, *QUESTIONS_STATES, GENERATE_NICHES, NICHE_SELECTION, GENERATE_PLAN = range(23)
+NUM_QUESTIONS = 20
+START, *QUESTIONS_STATES, GENERATE_NICHES, NICHE_SELECTION = range(NUM_QUESTIONS + 2)
 
 # Вопросы и кнопки-ответы
 QUIZ_QUESTIONS = [
@@ -130,10 +131,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я помогу тебе найти нишу для бизнеса. "
                                     "Давай начнём анкету из 20 вопросов.",
                                     reply_markup=ReplyKeyboardRemove())
-
     context.user_data['answers'] = {}
     context.user_data['question_index'] = 0
-
     return await ask_question(update, context)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -147,6 +146,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help - Показать это сообщение."
     )
     await update.message.reply_text(help_text, reply_markup=ReplyKeyboardRemove())
+    return ConversationHandler.END
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сбрасывает анкету."""
@@ -171,7 +171,6 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = ReplyKeyboardMarkup(question_data["options"], one_time_keyboard=True, resize_keyboard=True)
     
     await update.message.reply_text(question_data["text"], reply_markup=keyboard)
-
     return q_index
 
 async def handle_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -322,14 +321,13 @@ def main() -> None:
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
     # Определяем состояния для каждого вопроса
-    quiz_states_dict = {i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)] for i in range(len(QUIZ_QUESTIONS))}
+    quiz_states_dict = {i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)] for i in range(NUM_QUESTIONS)}
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start_command)],
         states={
-            0: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)],
             **quiz_states_dict,
-            len(QUIZ_QUESTIONS): [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_niche_selection)],
+            NICHE_SELECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_niche_selection)],
         },
         fallbacks=[CommandHandler('cancel', cancel_command), CommandHandler('reset', reset_command)],
     )
