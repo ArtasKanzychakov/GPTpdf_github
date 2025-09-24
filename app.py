@@ -267,6 +267,8 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
         
         await create_and_send_pdf(update, context)
         
+        await update.message.reply_text("Чтобы начать новый опрос, нажмите кнопку ниже:", reply_markup=ReplyKeyboardMarkup([["/start"]], resize_keyboard=True, one_time_keyboard=True))
+        
         return ConversationHandler.END
 
     except Exception as e:
@@ -329,7 +331,7 @@ def main() -> None:
             **quiz_states_dict,
             NICHE_SELECTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_niche_selection)],
         },
-        fallbacks=[CommandHandler('cancel', cancel_command), CommandHandler('reset', reset_command)],
+        fallbacks=[CommandHandler('cancel', cancel_command), CommandHandler('reset', reset_command), CommandHandler('start', start_command)],
     )
 
     app.add_handler(conv_handler)
@@ -337,7 +339,6 @@ def main() -> None:
     app.add_error_handler(error)
     app.add_handler(CommandHandler('reset', reset_command))
 
-    # Запускаем бота с вебхуком
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
