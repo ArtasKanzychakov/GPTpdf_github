@@ -17,7 +17,9 @@ from reportlab.lib.pagesizes import A4
 import io
 import json
 import asyncio
-from datetime import datetime, timedelta
+import threading
+import time
+from datetime import datetime
 
 # Настройка логирования
 logging.basicConfig(
@@ -26,7 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Конфигурация (оставляем всё как было)
+# Конфигурация
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 OPENAI_MODEL = "gpt-3.5-turbo"
@@ -39,11 +41,11 @@ if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
 # Инициализация OpenAI клиента
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Определяем состояния для ConversationHandler (теперь 10 вопросов)
+# Определяем состояния для ConversationHandler
 NUM_QUESTIONS = 10
 START, *QUESTIONS_STATES, GENERATE_NICHES = range(NUM_QUESTIONS + 1)
 
-# Обновленные вопросы - конкретнее и практичнее
+# Вопросы
 QUIZ_QUESTIONS = [
     {
         "text": "💰 **Бюджет на старт**: Сколько денег вы готовы вложить прямо сейчас?",
@@ -79,16 +81,30 @@ QUIZ_QUESTIONS = [
     },
     {
         "text": "🛠️ **Навыки**: Какие ваши сильные стороны?",
-        "options": None  # Открытый вопрос
+        "options": None
     },
     {
         "text": "🔥 **Страсть**: О чём вы можете говорить часами? Что вас зажигает?",
-        "options": None  # Открытый вопрос
+        "options": None
     }
 ]
 
-# Глобальное хранилище для идей пользователя
+# Хранилище данных
 user_niches = {}
+
+# Флаг для отслеживания запуска keep_alive
+_keep_alive_started = False
+
+def keep_alive_background():
+    """Фоновая задача чтобы бот не засыпал."""
+    while True:
+        try:
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            logger.info(f"🤖 Бот активен - {current_time}")
+            time.sleep(300)  # Каждые 5 минут
+        except Exception as e:
+            logger.error(f"Keep alive error: {e}")
+            time.sleep(60)
 
 # Команды
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -135,7 +151,7 @@ async def start_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data['question_index'] = 0
     context.user_data['chat_id'] = query.message.chat_id
     
-    # Запускаем первый вопрос
+    # Отправляем первый вопрос
     return await ask_question_callback(query, context)
 
 async def ask_question_callback(query, context: ContextTypes.DEFAULT_TYPE):
@@ -198,9 +214,9 @@ async def generate_niches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     Требования к ответу:
     1. Только 5 идей, пронумерованных от 1 до 5
-    2. Каждая идея должна быть ОЧЕНЬ конкретной (не "онлайн-бизнес", а "онлайн-школа по обучению Photoshop для дизайнеров-фрилансеров")
+    2. Каждая идея должна быть ОЧЕНЬ конкретной
     3. Учитывай бюджет, время и опыт из ответов
-    4. Формат: "1. [Название идеи] - [Краткое описание 10-15 слов]"
+    4. Формат: "1. [Название идеи] - [Краткое описание]"
     5. Без лишнего текста, только список
     """
     
@@ -210,7 +226,7 @@ async def generate_niches(update: Update, context: ContextTypes.DEFAULT_TYPE):
         completion = openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": "Ты - практикующий бизнес-консультант с 10-летним опытом. Предлагаешь только реалистичные и выполнимые бизнес-идеи."},
+                {"role": "system", "content": "Ты - практикующий бизнес-консультант. Предлагаешь только реалистичные идеи."},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -225,14 +241,12 @@ async def generate_niches(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_niches[user_id] = niches
         context.user_data['niches'] = niches
         
-        # Создаем инлайн-клавиатуру с 5 идеями
+        # Создаем инлайн-клавиатуру
         keyboard = []
         for i, niche in enumerate(niches[:5], 1):
-            # Обрезаем длинное название для кнопки
             button_text = niche[:3] + "..." if len(niche) > 30 else niche
             keyboard.append([InlineKeyboardButton(f"{i}. {button_text}", callback_data=f"niche_{i}")])
         
-        # Добавляем кнопки управления
         keyboard.append([
             InlineKeyboardButton("🔄 Новые идеи", callback_data="regenerate"),
             InlineKeyboardButton("📋 Все идеи", callback_data="show_all")
@@ -242,8 +256,7 @@ async def generate_niches(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             "🎯 **Вот 5 бизнес-идей специально для вас:**\n\n"
-            "Нажмите на любую идею, чтобы получить подробный план.\n"
-            "Вы можете вернуться и посмотреть другие идеи в любой момент!",
+            "Нажмите на любую идею, чтобы получить подробный план.",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
@@ -252,7 +265,7 @@ async def generate_niches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error calling OpenAI API: {e}")
         await update.message.reply_text(
-            "Произошла ошибка при генерации идей. Пожалуйста, попробуйте позже.",
+            "Произошла ошибка при генерации идей. Попробуйте позже.",
             reply_markup=ReplyKeyboardMarkup([["/start"]], resize_keyboard=True)
         )
         return ConversationHandler.END
@@ -272,7 +285,7 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
             context.user_data['selected_niche'] = selected_niche
             
             await query.edit_message_text(
-                f"⏳ **Готовлю подробный план для:**\n\n"
+                f"⏳ **Готовлю план для:**\n\n"
                 f"**{selected_niche}**\n\n"
                 f"Это займет 20-30 секунд...",
                 parse_mode='Markdown'
@@ -280,32 +293,32 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
             
             # Генерируем бизнес-план
             plan_prompt = f"""
-            Создай ПОДРОБНЫЙ бизнес-план для идеи: "{selected_niche}"
+            Создай бизнес-план для идеи: "{selected_niche}"
             
-            Структура плана:
-            1. **🎯 Суть проекта** (1-2 предложения)
-            2. **💰 Стартовые инвестиции** (разбивка по статьям)
-            3. **📅 План запуска на 30 дней** (конкретные шаги по дням)
-            4. **🎯 Целевая аудитория** (где искать клиентов)
-            5. **📈 Монетизация** (ценовая политика, каналы продаж)
-            6. **⚠️ Риски и решения** (что может пойти не так и как избежать)
-            7. **🚀 Первые 3 шага** (что сделать прямо сейчас)
+            Структура:
+            1. **Суть проекта**
+            2. **Стартовые инвестиции**
+            3. **План запуска на 30 дней**
+            4. **Целевая аудитория**
+            5. **Монетизация**
+            6. **Риски и решения**
+            7. **Первые 3 шага**
             
-            Будь максимально конкретным и практичным!
+            Будь конкретным и практичным!
             """
             
             try:
                 completion = openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=[
-                        {"role": "system", "content": "Ты - практикующий бизнес-аналитик. Даешь конкретные, выполнимые рекомендации с цифрами и сроками."},
+                        {"role": "system", "content": "Ты - бизнес-аналитик. Даешь конкретные рекомендации."},
                         {"role": "user", "content": plan_prompt}
                     ]
                 )
                 business_plan = completion.choices[0].message.content
                 context.user_data['business_plan'] = business_plan
                 
-                # Создаем клавиатуру с кнопкой PDF и возвратом к идеям
+                # Клавиатура с кнопками
                 keyboard = [
                     [InlineKeyboardButton("📥 Скачать PDF", callback_data="download_pdf")],
                     [InlineKeyboardButton("← Назад к идеям", callback_data="back_to_niches"),
@@ -325,12 +338,11 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
             except Exception as e:
                 logger.error(f"Error generating business plan: {e}")
                 await query.edit_message_text(
-                    "Ошибка при создании плана. Попробуйте выбрать другую идею.",
+                    "Ошибка при создании плана.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="back_to_niches")]])
                 )
     
     elif query.data == "show_all":
-        # Показываем все идеи списком
         if user_id in user_niches:
             all_niches = "\n".join(user_niches[user_id])
             
@@ -351,17 +363,14 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
             )
     
     elif query.data == "regenerate":
-        # Генерируем новые идеи
         await query.edit_message_text("🔄 Генерирую новые идеи...")
         
-        # Используем сохраненные ответы для генерации новых идей
         if 'answers' in context.user_data:
-            # Немного изменяем промпт для разнообразия
             new_prompt = f"""
-            На основе этих же ответов предложи 5 ДРУГИХ, новых бизнес-идей:
+            На основе этих же ответов предложи 5 ДРУГИХ бизнес-идей:
             {json.dumps(context.user_data['answers'], indent=2, ensure_ascii=False)}
             
-            Идеи должны быть СОВЕРШЕННО другими, не похожими на предыдущие.
+            Идеи должны быть другими.
             Формат: "1. [Название] - [Описание]"
             """
             
@@ -369,7 +378,7 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
                 completion = openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=[
-                        {"role": "system", "content": "Ты креативный бизнес-консультант. Придумываешь неочевидные, но реалистичные бизнес-идеи."},
+                        {"role": "system", "content": "Придумываешь неочевидные бизнес-идеи."},
                         {"role": "user", "content": new_prompt}
                     ]
                 )
@@ -380,7 +389,6 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
                 
                 user_niches[user_id] = new_niches
                 
-                # Показываем новые идеи
                 keyboard = []
                 for i, niche in enumerate(new_niches[:5], 1):
                     button_text = niche[:30] + "..." if len(niche) > 30 else niche
@@ -401,12 +409,11 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
             except Exception as e:
                 logger.error(f"Error regenerating niches: {e}")
                 await query.edit_message_text(
-                    "Ошибка генерации. Попробуйте начать заново /start",
+                    "Ошибка генерации.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("/start", callback_data="start")]])
                 )
     
     elif query.data == "back_to_niches":
-        # Возвращаемся к списку идей
         if user_id in user_niches:
             keyboard = []
             for i, niche in enumerate(user_niches[user_id][:5], 1):
@@ -426,11 +433,9 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
             )
     
     elif query.data == "download_pdf":
-        # Создаем и отправляем PDF
         await create_and_send_pdf_callback(query, context)
     
     elif query.data == "back_main":
-        # Возврат к главному меню
         await query.edit_message_text(
             "Выберите действие:",
             reply_markup=InlineKeyboardMarkup([
@@ -441,9 +446,8 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
         )
     
     elif query.data == "start":
-        # Перезапуск
         await query.edit_message_text(
-            "Используйте команду /start чтобы начать новую анкету.",
+            "Используйте команду /start",
             reply_markup=None
         )
     
@@ -456,33 +460,26 @@ async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE
         
         buffer = io.BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4)
-        
-        # Используем стандартные шрифты
         c.setFont("Helvetica", 12)
         
-        # Заголовок
         title = context.user_data.get('selected_niche', 'Бизнес-план')
         c.setFont("Helvetica-Bold", 16)
         c.drawString(50, 800, "БИЗНЕС-ПЛАН")
         c.setFont("Helvetica", 14)
-        c.drawString(50, 775, title[:80])  # Обрезаем слишком длинный заголовок
+        c.drawString(50, 775, title[:80])
         
-        # Линия-разделитель
         c.line(50, 765, 550, 765)
         
-        # Контент
-        business_plan = context.user_data.get('business_plan', 'Бизнес-план не сгенерирован')
+        business_plan = context.user_data.get('business_plan', '')
         c.setFont("Helvetica", 12)
         
-        # Упрощаем форматирование
         lines = []
         for line in business_plan.split('\n'):
-            clean_line = line.replace('**', '').replace('__', '').replace('###', '').strip()
+            clean_line = line.replace('**', '').replace('__', '').strip()
             if clean_line:
                 lines.append(clean_line)
         
         y_position = 740
-        line_height = 14
         
         for line in lines:
             if y_position < 50:
@@ -490,7 +487,6 @@ async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE
                 c.setFont("Helvetica", 12)
                 y_position = 800
             
-            # Разбиваем длинные строки
             if len(line) > 80:
                 words = line.split(' ')
                 current_line = ""
@@ -499,7 +495,7 @@ async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE
                         current_line += word + " "
                     else:
                         c.drawString(50, y_position, current_line)
-                        y_position -= line_height
+                        y_position -= 16
                         current_line = word + " "
                         if y_position < 50:
                             c.showPage()
@@ -507,32 +503,29 @@ async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE
                             y_position = 800
                 if current_line:
                     c.drawString(50, y_position, current_line)
-                    y_position -= line_height
+                    y_position -= 16
             else:
                 c.drawString(50, y_position, line)
-                y_position -= line_height
+                y_position -= 16
             
             y_position -= 2
         
-        # Футер
         c.setFont("Helvetica-Oblique", 10)
         c.drawString(50, 30, "Сгенерировано Business Idea Bot")
-        c.drawString(50, 15, datetime.now().strftime("%d.%m.%Y %H:%M"))
+        c.drawString(50, 15, datetime.now().strftime("%d.%m.%Y"))
         
         c.save()
         buffer.seek(0)
         
-        # Отправляем PDF
         await context.bot.send_document(
             chat_id=query.message.chat_id,
             document=buffer,
             filename=f"business_plan_{query.from_user.id}.pdf",
-            caption=f"📄 Ваш бизнес-план готов!\n\n{title[:50]}..."
+            caption=f"📄 Ваш бизнес-план!\n\n{title[:50]}..."
         )
         
         buffer.close()
         
-        # Оставляем сообщение с планом и кнопками
         keyboard = [
             [InlineKeyboardButton("← К идеям", callback_data="back_to_niches")],
             [InlineKeyboardButton("🔄 Новые идеи", callback_data="regenerate")]
@@ -540,39 +533,17 @@ async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE
         
         await query.edit_message_text(
             f"✅ **PDF отправлен!**\n\n"
-            f"**{title}**\n\n"
-            f"Проверьте документы в чате ↑\n\n"
-            f"Что дальше?",
+            f"Проверьте документы в чате ↑",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
         
     except Exception as e:
-        logger.error(f"Error creating/sending PDF: {e}")
-        # Отправляем как текстовый файл
-        try:
-            business_plan = context.user_data.get('business_plan', '')
-            text_buffer = io.BytesIO(business_plan.encode('utf-8'))
-            text_buffer.seek(0)
-            
-            await context.bot.send_document(
-                chat_id=query.message.chat_id,
-                document=text_buffer,
-                filename=f"business_plan_{query.from_user.id}.txt",
-                caption=f"📄 Ваш бизнес-план в TXT формате\n\n{title[:50]}..."
-            )
-            text_buffer.close()
-            
-            await query.edit_message_text(
-                f"✅ **Файл отправлен в формате TXT!**\n\n"
-                f"Проверьте документы в чате ↑",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="back_to_niches")]])
-            )
-        except:
-            await query.edit_message_text(
-                "Ошибка при создании файла. Но вы можете скопировать текст плана выше.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="niche_1")]])
-            )
+        logger.error(f"Error creating PDF: {e}")
+        await query.edit_message_text(
+            "Ошибка при создании файла.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="back_to_niches")]])
+        )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправляет сообщение-помощь."""
@@ -584,14 +555,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2. Получаете 5 персональных бизнес-идей\n"
         "3. Выбираете идею и получаете детальный план\n"
         "4. Скачиваете план в PDF\n\n"
-        "🔄 **Вы можете:**\n"
-        "• Просматривать все идеи в любое время\n"
-        "• Генерировать новые идеи\n"
-        "• Скачивать PDF для любой идеи\n\n"
         "📝 **Команды:**\n"
         "/start - Начать анкету\n"
         "/help - Эта справка\n"
-        "/cancel - Отменить текущий диалог"
+        "/cancel - Отменить диалог"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -610,7 +577,7 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del user_niches[user_id]
     
     await update.message.reply_text(
-        '✅ Данные сброшены. Используйте /start чтобы начать новую анкету.',
+        '✅ Данные сброшены. Используйте /start.',
         reply_markup=ReplyKeyboardRemove()
     )
     return ConversationHandler.END
@@ -619,34 +586,25 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Логирует ошибки."""
     logger.error(f'Update {update} caused error {context.error}')
 
-async def keep_alive():
-    """Фоновая задача чтобы бот не засыпал."""
-    while True:
-        try:
-            # Просто логируем что бот жив
-            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            logger.info(f"🤖 Бот активен - {current_time}")
-            await asyncio.sleep(300)  # Каждые 5 минут
-        except Exception as e:
-            logger.error(f"Keep alive error: {e}")
-            await asyncio.sleep(60)
-
 def main() -> None:
-    """Запускает бота с вебхуком для Production."""
+    """Запускает бота."""
     PORT = int(os.environ.get('PORT', 8443))
     
-    # Создаем Application с job_queue
+    # Создаем Application БЕЗ job_queue
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # Запускаем фоновую задачу для поддержания активности
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.create_task(keep_alive())
+    # Запускаем фоновый поток для keep-alive
+    global _keep_alive_started
+    if not _keep_alive_started:
+        keep_alive_thread = threading.Thread(target=keep_alive_background, daemon=True)
+        keep_alive_thread.start()
+        _keep_alive_started = True
+        logger.info("Keep-alive thread started")
     
-    # Определяем состояния для каждого вопроса (теперь 10)
+    # Определяем состояния
     quiz_states_dict = {i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)] for i in range(NUM_QUESTIONS)}
     
-    # ConversationHandler для анкеты с per_message=True
+    # ConversationHandler
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', start_command),
@@ -665,9 +623,7 @@ def main() -> None:
             CommandHandler('cancel', cancel_command),
             CommandHandler('reset', reset_command),
             CommandHandler('start', start_command),
-            CallbackQueryHandler(cancel_command, pattern="^cancel$")
         ],
-        per_message=True  # Это исправляет предупреждение
     )
 
     app.add_handler(conv_handler)
@@ -675,8 +631,8 @@ def main() -> None:
     app.add_handler(CommandHandler('reset', reset_command))
     app.add_error_handler(error)
     
-    # ВЕБХУКИ - оставляем как было
-    logger.info("Starting bot with webhook...")
+    # Запускаем вебхук
+    logger.info("Starting bot...")
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
