@@ -14,11 +14,10 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from openai import OpenAI
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 import io
 import json
 import asyncio
+from datetime import datetime, timedelta
 
 # Настройка логирования
 logging.basicConfig(
@@ -88,7 +87,7 @@ QUIZ_QUESTIONS = [
     }
 ]
 
-# Глобальное хранилище для идей пользователя (в реальном проекте лучше использовать БД)
+# Глобальное хранилище для идей пользователя
 user_niches = {}
 
 # Команды
@@ -118,6 +117,13 @@ async def start_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Обработка callback для начала опроса."""
     query = update.callback_query
     await query.answer()
+    
+    if query.data == "cancel":
+        await query.edit_message_text(
+            "Диалог отменен. Используйте /start чтобы начать заново.",
+            reply_markup=None
+        )
+        return ConversationHandler.END
     
     await query.edit_message_text(
         "Отлично! Начинаем анкету из 10 вопросов.\n\n"
@@ -434,6 +440,13 @@ async def handle_niche_selection(update: Update, context: ContextTypes.DEFAULT_T
             ])
         )
     
+    elif query.data == "start":
+        # Перезапуск
+        await query.edit_message_text(
+            "Используйте команду /start чтобы начать новую анкету.",
+            reply_markup=None
+        )
+    
     return GENERATE_NICHES
 
 async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE):
@@ -441,60 +454,70 @@ async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE
     try:
         await query.answer("Создаю PDF...")
         
-        # Регистрируем шрифт (нужно будет добавить файл шрифта в проект)
-        try:
-            pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
-            font_name = 'DejaVuSans'
-        except:
-            font_name = 'Helvetica'
-        
         buffer = io.BytesIO()
         c = canvas.Canvas(buffer, pagesize=A4)
-        c.setFont(font_name, 12)
+        
+        # Используем стандартные шрифты
+        c.setFont("Helvetica", 12)
         
         # Заголовок
         title = context.user_data.get('selected_niche', 'Бизнес-план')
-        c.setFont(font_name, 16)
-        c.drawString(50, 800, title[:80])  # Обрезаем слишком длинный заголовок
-        c.setFont(font_name, 12)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(50, 800, "БИЗНЕС-ПЛАН")
+        c.setFont("Helvetica", 14)
+        c.drawString(50, 775, title[:80])  # Обрезаем слишком длинный заголовок
+        
+        # Линия-разделитель
+        c.line(50, 765, 550, 765)
         
         # Контент
-        business_plan = context.user_data.get('business_plan', '')
-        lines = business_plan.split('\n')
-        y_position = 750
+        business_plan = context.user_data.get('business_plan', 'Бизнес-план не сгенерирован')
+        c.setFont("Helvetica", 12)
+        
+        # Упрощаем форматирование
+        lines = []
+        for line in business_plan.split('\n'):
+            clean_line = line.replace('**', '').replace('__', '').replace('###', '').strip()
+            if clean_line:
+                lines.append(clean_line)
+        
+        y_position = 740
+        line_height = 14
         
         for line in lines:
             if y_position < 50:
                 c.showPage()
+                c.setFont("Helvetica", 12)
                 y_position = 800
-                c.setFont(font_name, 12)
             
-            # Обрабатываем жирный текст (упрощенно)
-            if line.strip().startswith('**') and line.strip().endswith('**'):
-                c.setFont(font_name, 14)
-                c.drawString(50, y_position, line.replace('**', '').strip())
-                c.setFont(font_name, 12)
-                y_position -= 20
-            else:
-                # Разбиваем длинные строки
-                if len(line) > 100:
-                    words = line.split(' ')
-                    current_line = ""
-                    for word in words:
-                        if len(current_line + word) < 100:
-                            current_line += word + " "
-                        else:
-                            c.drawString(50, y_position, current_line)
-                            y_position -= 16
-                            current_line = word + " "
-                    if current_line:
+            # Разбиваем длинные строки
+            if len(line) > 80:
+                words = line.split(' ')
+                current_line = ""
+                for word in words:
+                    if len(current_line + word) < 80:
+                        current_line += word + " "
+                    else:
                         c.drawString(50, y_position, current_line)
-                        y_position -= 16
-                else:
-                    c.drawString(50, y_position, line)
-                    y_position -= 16
+                        y_position -= line_height
+                        current_line = word + " "
+                        if y_position < 50:
+                            c.showPage()
+                            c.setFont("Helvetica", 12)
+                            y_position = 800
+                if current_line:
+                    c.drawString(50, y_position, current_line)
+                    y_position -= line_height
+            else:
+                c.drawString(50, y_position, line)
+                y_position -= line_height
             
-            y_position -= 4
+            y_position -= 2
+        
+        # Футер
+        c.setFont("Helvetica-Oblique", 10)
+        c.drawString(50, 30, "Сгенерировано Business Idea Bot")
+        c.drawString(50, 15, datetime.now().strftime("%d.%m.%Y %H:%M"))
         
         c.save()
         buffer.seek(0)
@@ -503,7 +526,7 @@ async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE
         await context.bot.send_document(
             chat_id=query.message.chat_id,
             document=buffer,
-            filename=f"Бизнес_план_{query.from_user.id}.pdf",
+            filename=f"business_plan_{query.from_user.id}.pdf",
             caption=f"📄 Ваш бизнес-план готов!\n\n{title[:50]}..."
         )
         
@@ -526,10 +549,30 @@ async def create_and_send_pdf_callback(query, context: ContextTypes.DEFAULT_TYPE
         
     except Exception as e:
         logger.error(f"Error creating/sending PDF: {e}")
-        await query.edit_message_text(
-            "Ошибка при создании PDF. Попробуйте ещё раз.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="niche_1")]])
-        )
+        # Отправляем как текстовый файл
+        try:
+            business_plan = context.user_data.get('business_plan', '')
+            text_buffer = io.BytesIO(business_plan.encode('utf-8'))
+            text_buffer.seek(0)
+            
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=text_buffer,
+                filename=f"business_plan_{query.from_user.id}.txt",
+                caption=f"📄 Ваш бизнес-план в TXT формате\n\n{title[:50]}..."
+            )
+            text_buffer.close()
+            
+            await query.edit_message_text(
+                f"✅ **Файл отправлен в формате TXT!**\n\n"
+                f"Проверьте документы в чате ↑",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="back_to_niches")]])
+            )
+        except:
+            await query.edit_message_text(
+                "Ошибка при создании файла. Но вы можете скопировать текст плана выше.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("← Назад", callback_data="niche_1")]])
+            )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отправляет сообщение-помощь."""
@@ -562,10 +605,9 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сбрасывает анкету."""
-    if 'user_id' in context.user_data:
-        user_id = context.user_data['user_id']
-        if user_id in user_niches:
-            del user_niches[user_id]
+    user_id = update.effective_user.id
+    if user_id in user_niches:
+        del user_niches[user_id]
     
     await update.message.reply_text(
         '✅ Данные сброшены. Используйте /start чтобы начать новую анкету.',
@@ -577,44 +619,55 @@ async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Логирует ошибки."""
     logger.error(f'Update {update} caused error {context.error}')
 
-async def wake_up_task(app: Application):
-    """Периодическая задача чтобы бот не засыпал на Render."""
+async def keep_alive():
+    """Фоновая задача чтобы бот не засыпал."""
     while True:
         try:
             # Просто логируем что бот жив
-            logger.info("Bot is alive and kicking!")
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            logger.info(f"🤖 Бот активен - {current_time}")
             await asyncio.sleep(300)  # Каждые 5 минут
         except Exception as e:
-            logger.error(f"Wake up task error: {e}")
+            logger.error(f"Keep alive error: {e}")
             await asyncio.sleep(60)
 
 def main() -> None:
     """Запускает бота с вебхуком для Production."""
     PORT = int(os.environ.get('PORT', 8443))
     
+    # Создаем Application с job_queue
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # Запускаем фоновую задачу для поддержания активности
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.create_task(keep_alive())
     
     # Определяем состояния для каждого вопроса (теперь 10)
     quiz_states_dict = {i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)] for i in range(NUM_QUESTIONS)}
     
-    # ConversationHandler для анкеты
+    # ConversationHandler для анкеты с per_message=True
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', start_command),
-            CallbackQueryHandler(start_quiz_callback, pattern="^start_quiz$")
+            CallbackQueryHandler(start_quiz_callback, pattern="^(start_quiz|cancel)$")
         ],
         states={
-            START: [CallbackQueryHandler(start_quiz_callback, pattern="^start_quiz$")],
+            START: [
+                CallbackQueryHandler(start_quiz_callback, pattern="^(start_quiz|cancel)$")
+            ],
             **quiz_states_dict,
             GENERATE_NICHES: [
-                CallbackQueryHandler(handle_niche_selection, pattern="^(niche_|show_all|regenerate|back_|download_)"),
+                CallbackQueryHandler(handle_niche_selection, pattern="^(niche_|show_all|regenerate|back_|download_|start|cancel)$"),
             ],
         },
         fallbacks=[
             CommandHandler('cancel', cancel_command),
             CommandHandler('reset', reset_command),
-            CommandHandler('start', start_command)
+            CommandHandler('start', start_command),
+            CallbackQueryHandler(cancel_command, pattern="^cancel$")
         ],
+        per_message=True  # Это исправляет предупреждение
     )
 
     app.add_handler(conv_handler)
@@ -622,10 +675,8 @@ def main() -> None:
     app.add_handler(CommandHandler('reset', reset_command))
     app.add_error_handler(error)
     
-    # Запускаем фоновую задачу чтобы бот не засыпал
-    app.job_queue.run_once(lambda context: asyncio.create_task(wake_up_task(app)), when=10)
-    
     # ВЕБХУКИ - оставляем как было
+    logger.info("Starting bot with webhook...")
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
