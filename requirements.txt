@@ -4,5 +4,5 @@ reportlab==4.2.0
 python-dotenv==1.0.0
 aiohttp==3.9.1
 asyncpg==0.29.0
-aioschedule==0.4.0
+schedule==1.2.0  # ← ВМЕСТО aioschedule
 pydantic==2.12.5
