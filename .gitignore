@@ -42,5 +42,8 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Render
-render.yaml
+# Бот
+session_data/
+*.log
+*.db
+*.sqlite
