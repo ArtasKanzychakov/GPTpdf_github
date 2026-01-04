@@ -519,7 +519,7 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# ==================== ОСНОВНАЯ ФУНКЦИЯ (ИСПРАВЛЕННАЯ) ====================
+# ==================== ОСНОВНАЯ ФУНКЦИЯ (УПРОЩЕННАЯ) ====================
 async def main():
     """Главная функция запуска бота"""
     logger.info("=" * 50)
@@ -577,32 +577,17 @@ async def main():
     application.add_handler(CommandHandler('status', status_command))
     application.add_handler(CommandHandler('reset', reset_command))
     
-    # 4. Настройки для Render
-    await application.initialize()
+    # 4. ЗАПУСКАЕМ БОТА ПРОСТО И БЕЗ ПАРАМЕТРОВ
+    logger.info("✅ Бот запускается...")
     
-    # Очищаем старые вебхуки (важно для предотвращения конфликтов)
     try:
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        await asyncio.sleep(2)
-        logger.info("✅ Вебхуки очищены")
+        # ПРОСТОЙ ЗАПУСК БЕЗ ВСЯКИХ ПАРАМЕТРОВ
+        await application.run_polling()
+        
+    except KeyboardInterrupt:
+        logger.info("⏹️ Бот остановлен пользователем")
     except Exception as e:
-        logger.warning(f"⚠️ Ошибка очистки вебхуков: {e}")
-    
-    logger.info("✅ Бот запускается в режиме polling...")
-    
-    # 5. Запускаем polling с ПРАВИЛЬНЫМИ параметрами для python-telegram-bot==20.3
-    try:
-        # ВАЖНО: python-telegram-bot 20.3 не поддерживает close_bot_session и handle_signals
-        await application.run_polling(
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES,
-            poll_interval=1.0,
-            timeout=30
-            # УБРАНО: close_bot_session=False (не существует в этой версии)
-            # УБРАНО: handle_signals=False (не существует в этой версии)
-        )
-    except Exception as e:
-        logger.critical(f"❌ Ошибка при запуске polling: {e}")
+        logger.critical(f"❌ Ошибка при запуске: {e}", exc_info=True)
         raise
     finally:
         # Останавливаем health check сервер
@@ -613,11 +598,7 @@ async def main():
             pass
         logger.info("⏹️ Бот остановлен")
 
+# ==================== ЗАПУСК ПРОГРАММЫ ====================
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("⏹️ Бот остановлен пользователем")
-    except Exception as e:
-        logger.critical(f"💥 Критическая ошибка: {e}", exc_info=True)
-        raise
+    # САМЫЙ ПРОСТОЙ ЗАПУСК - используем asyncio.run()
+    asyncio.run(main())
