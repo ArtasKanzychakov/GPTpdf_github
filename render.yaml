@@ -15,11 +15,6 @@ services:
         sync: false
       - key: PORT
         value: "10000"
-      - key: RENDER_EXTERNAL_URL
-        fromService:
-          name: telegram-business-bot
-          type: web
-          property: url
     healthCheckPath: /health
     healthCheckTimeout: 180
     autoDeploy: true
