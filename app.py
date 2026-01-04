@@ -519,7 +519,7 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
+# ==================== ОСНОВНАЯ ФУНКЦИЯ (ИСПРАВЛЕННАЯ) ====================
 async def main():
     """Главная функция запуска бота"""
     logger.info("=" * 50)
@@ -590,20 +590,16 @@ async def main():
     
     logger.info("✅ Бот запускается в режиме polling...")
     
-    # 5. Запускаем polling с параметрами для Render
+    # 5. Запускаем polling с ПРАВИЛЬНЫМИ параметрами для python-telegram-bot==20.3
     try:
+        # ВАЖНО: python-telegram-bot 20.3 не поддерживает close_bot_session и handle_signals
         await application.run_polling(
-            # Ключевой параметр для предотвращения конфликтов на Render
-            close_bot_session=False,
-            
-            # Оптимизация для стабильности
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
             poll_interval=1.0,
-            timeout=30,
-            
-            # Отключаем обработку сигналов (для Render)
-            handle_signals=False
+            timeout=30
+            # УБРАНО: close_bot_session=False (не существует в этой версии)
+            # УБРАНО: handle_signals=False (не существует в этой версии)
         )
     except Exception as e:
         logger.critical(f"❌ Ошибка при запуске polling: {e}")
