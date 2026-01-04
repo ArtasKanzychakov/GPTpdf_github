@@ -32,16 +32,27 @@ TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 OPENAI_MODEL = "gpt-3.5-turbo"
 
-# Проверка конфигурации
+# ВРЕМЕННО: Тестовые значения для проверки
 if not TELEGRAM_TOKEN:
-    logger.critical("Не задан TELEGRAM_BOT_TOKEN!")
-    raise ValueError("TELEGRAM_BOT_TOKEN должен быть установлен")
+    logger.warning("⚠️ TELEGRAM_BOT_TOKEN не задан, используем тестовый токен")
+    TELEGRAM_TOKEN = "test_telegram_token_placeholder"
+    
 if not OPENAI_API_KEY:
-    logger.critical("Не задан OPENAI_API_KEY!")
-    raise ValueError("OPENAI_API_KEY должен быть установлен")
+    logger.warning("⚠️ OPENAI_API_KEY не задан, используем тестовый ключ")
+    OPENAI_API_KEY = "test_openai_key_placeholder"
 
-# Инициализация OpenAI
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+logger.info(f"✅ PORT: {PORT}")
+logger.info(f"✅ TELEGRAM_TOKEN задан: {'Да' if TELEGRAM_TOKEN and TELEGRAM_TOKEN != 'test_telegram_token_placeholder' else 'Нет (тестовый)'}")
+logger.info(f"✅ OPENAI_API_KEY задан: {'Да' if OPENAI_API_KEY and OPENAI_API_KEY != 'test_openai_key_placeholder' else 'Нет (тестовый)'}")
+
+# Инициализация OpenAI (даже с тестовым ключом)
+try:
+    openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    logger.info("✅ OpenAI клиент инициализирован")
+except Exception as e:
+    logger.error(f"❌ Ошибка инициализации OpenAI: {e}")
+    # Создаем заглушку для теста
+    openai_client = None
 
 # Состояния ConversationHandler
 START, Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8, Q9, Q10, Q11, Q12, Q13, Q14, Q15, Q16, GENERATE_NICHES = range(18)
@@ -108,6 +119,14 @@ async def start_http_server():
 # ==================== КОМАНДЫ БОТА ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
+    # Проверяем наличие ключей
+    if TELEGRAM_TOKEN == "test_telegram_token_placeholder":
+        await update.message.reply_text(
+            "⚠️ *ВНИМАНИЕ: Бот в тестовом режиме*\n\n"
+            "TELEGRAM_BOT_TOKEN не настроен. Бот работает в демо-режиме.",
+            parse_mode='Markdown'
+        )
+    
     await update.message.reply_text(
         "🤖 **Бизнес-навигатор**\n\n"
         "✅ *Расширенная анкета из 16 вопросов*\n"
@@ -127,6 +146,15 @@ async def start_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Начало анкеты"""
     query = update.callback_query
     await query.answer()
+    
+    # Проверяем OpenAI ключ
+    if not openai_client or OPENAI_API_KEY == "test_openai_key_placeholder":
+        await query.edit_message_text(
+            "❌ *OpenAI API ключ не настроен*\n\n"
+            "Для работы бота требуется настроить OPENAI_API_KEY в настройках Render.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
     
     user_id = query.from_user.id
     user_data_store[user_id] = {
@@ -204,6 +232,15 @@ async def generate_ideas(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     """Генерация бизнес-идей на основе анкеты"""
     user_data = user_data_store[user_id]
     
+    # Проверка OpenAI клиента
+    if not openai_client:
+        await context.bot.send_message(
+            chat_id=user_data['chat_id'],
+            text="❌ OpenAI API не настроен. Проверьте OPENAI_API_KEY в настройках Render.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
     try:
         # Формируем промпт для GPT
         profile_summary = "\n".join([f"{key}: {value}" for key, value in user_data['answers'].items()])
@@ -235,6 +272,8 @@ async def generate_ideas(context: ContextTypes.DEFAULT_TYPE, user_id: int):
         
         Формат: каждая идея с новой строки, с четкой нумерацией 1-5.
         """
+        
+        logger.info(f"Генерация идей для пользователя {user_id}, регион: {location}")
         
         # Отправляем запрос к OpenAI
         completion = await openai_client.chat.completions.create(
@@ -312,6 +351,14 @@ async def handle_idea_selection(update: Update, context: ContextTypes.DEFAULT_TY
         
         if user_id in user_niches_store and idx < len(user_niches_store[user_id]):
             idea = user_niches_store[user_id][idx]
+            
+            # Проверка OpenAI клиента
+            if not openai_client:
+                await query.edit_message_text(
+                    "❌ OpenAI API не настроен. Невозможно сгенерировать бизнес-план.",
+                    parse_mode='Markdown'
+                )
+                return GENERATE_NICHES
             
             # Генерируем детальный план
             plan_prompt = f"""
@@ -420,30 +467,42 @@ async def handle_idea_selection(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /help"""
+    # Информация о настройках
+    config_status = "✅" if TELEGRAM_TOKEN != "test_telegram_token_placeholder" else "⚠️"
+    openai_status = "✅" if OPENAI_API_KEY != "test_openai_key_placeholder" else "❌"
+    
     await update.message.reply_text(
-        "🤖 *Бизнес-навигатор*\n\n"
-        "📋 *Команды:*\n"
-        "/start - Начать анкету\n"
-        "/help - Эта справка\n"
-        "/status - Статус бота\n"
-        "/reset - Сбросить текущую сессию\n\n"
-        "💡 *Как работает:*\n"
-        "1. Ответьте на 16 вопросов о себе\n"
-        "2. Получите 5 персонализированных бизнес-идей\n"
-        "3. Выберите идею для детального плана\n"
-        "4. Данные сохраняются пока вы в чате",
+        f"🤖 *Бизнес-навигатор*\n\n"
+        f"📋 *Статус настроек:*\n"
+        f"• Telegram бот: {config_status}\n"
+        f"• OpenAI API: {openai_status}\n\n"
+        f"📋 *Команды:*\n"
+        f"/start - Начать анкету\n"
+        f"/help - Эта справка\n"
+        f"/status - Статус бота\n"
+        f"/reset - Сбросить текущую сессию\n\n"
+        f"💡 *Как работает:*\n"
+        f"1. Ответьте на 16 вопросов о себе\n"
+        f"2. Получите 5 персонализированных бизнес-идей\n"
+        f"3. Выберите идею для детального плана\n"
+        f"4. Данные сохраняются пока вы в чате",
         parse_mode='Markdown'
     )
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /status"""
+    config_status = "✅ НАСТРОЕН" if TELEGRAM_TOKEN != "test_telegram_token_placeholder" else "⚠️ ТЕСТОВЫЙ"
+    openai_status = "✅ НАСТРОЕН" if OPENAI_API_KEY != "test_openai_key_placeholder" else "❌ НЕ НАСТРОЕН"
+    
     await update.message.reply_text(
         f"📊 *Статус системы*\n\n"
         f"• Активные сессии: {len(user_data_store)}\n"
+        f"• Telegram бот: {config_status}\n"
+        f"• OpenAI API: {openai_status}\n"
         f"• Порт сервера: {PORT}\n"
-        f"• OpenAI API: ✅ Активен\n"
         f"• Python версия: 3.9.16\n"
-        f"• Режим: Polling (Render)",
+        f"• Режим: Polling (Render)\n\n"
+        f"🌐 *Health check:* https://ваш-сервис.onrender.com/health",
         parse_mode='Markdown'
     )
 
@@ -463,13 +522,28 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
 async def main():
     """Главная функция запуска бота"""
+    logger.info("=" * 50)
     logger.info("🚀 Запуск бизнес-бота на Render...")
+    logger.info(f"Порт: {PORT}")
+    logger.info(f"Telegram токен: {'Настроен' if TELEGRAM_TOKEN != 'test_telegram_token_placeholder' else 'Тестовый'}")
+    logger.info(f"OpenAI ключ: {'Настроен' if OPENAI_API_KEY != 'test_openai_key_placeholder' else 'Тестовый'}")
+    logger.info("=" * 50)
     
     # 1. Запускаем health check сервер
-    http_runner = await start_http_server()
+    try:
+        http_runner = await start_http_server()
+        logger.info("✅ Health check сервер запущен")
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска health check сервера: {e}")
+        return
     
     # 2. Создаем приложение бота
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    try:
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
+        logger.info("✅ Приложение Telegram бота создано")
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания приложения бота: {e}")
+        return
     
     # 3. Настраиваем ConversationHandler
     quiz_states = {}
@@ -507,8 +581,12 @@ async def main():
     await application.initialize()
     
     # Очищаем старые вебхуки (важно для предотвращения конфликтов)
-    await application.bot.delete_webhook(drop_pending_updates=True)
-    await asyncio.sleep(2)
+    try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        await asyncio.sleep(2)
+        logger.info("✅ Вебхуки очищены")
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка очистки вебхуков: {e}")
     
     logger.info("✅ Бот запускается в режиме polling...")
     
@@ -528,18 +606,22 @@ async def main():
             handle_signals=False
         )
     except Exception as e:
-        logger.critical(f"Ошибка при запуске polling: {e}")
+        logger.critical(f"❌ Ошибка при запуске polling: {e}")
         raise
     finally:
         # Останавливаем health check сервер
-        await http_runner.cleanup()
+        try:
+            await http_runner.cleanup()
+            logger.info("✅ Health check сервер остановлен")
+        except:
+            pass
         logger.info("⏹️ Бот остановлен")
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Бот остановлен пользователем")
+        logger.info("⏹️ Бот остановлен пользователем")
     except Exception as e:
-        logger.critical(f"Критическая ошибка: {e}", exc_info=True)
+        logger.critical(f"💥 Критическая ошибка: {e}", exc_info=True)
         raise
