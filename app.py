@@ -118,6 +118,17 @@ async def start_http_server():
 # ==================== КОМАНДЫ БОТА ====================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
+    user_id = update.effective_user.id
+    
+    # Сохраняем пользователя
+    user_data_store[user_id] = {
+        'answers': {},
+        'question_index': 0,
+        'chat_id': update.message.chat_id,
+        'user_name': update.from_user.first_name,
+        'start_time': datetime.now().isoformat()
+    }
+    
     await update.message.reply_text(
         "🤖 **Бизнес-навигатор**\n\n"
         "✅ *Расширенная анкета из 16 вопросов*\n"
@@ -125,7 +136,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Анализ навыков и личных качеств\n"
         "• Подбор реальных бизнесов вашего региона\n"
         "• Детальные бизнес-планы\n\n"
-        "Начнем?",
+        "Нажмите кнопку ниже чтобы начать:",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Начать анкету", callback_data="start_quiz")]
         ]),
@@ -134,18 +145,33 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return START
 
 async def start_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало анкеты"""
+    """Начало анкеты при нажатии кнопки"""
     query = update.callback_query
     await query.answer()
     
     user_id = query.from_user.id
-    user_data_store[user_id] = {
-        'answers': {},
-        'question_index': 0,
-        'chat_id': query.message.chat_id,
-        'user_name': query.from_user.first_name,
-        'start_time': datetime.now().isoformat()
-    }
+    
+    # Проверяем OpenAI ключ
+    if not openai_client or OPENAI_API_KEY == "test_openai_key_placeholder":
+        await query.edit_message_text(
+            "❌ *OpenAI API ключ не настроен*\n\n"
+            "Для работы бота требуется настроить OPENAI_API_KEY в настройках Render.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+    
+    # Создаем или обновляем данные пользователя
+    if user_id not in user_data_store:
+        user_data_store[user_id] = {
+            'answers': {},
+            'question_index': 0,
+            'chat_id': query.message.chat_id,
+            'user_name': query.from_user.first_name,
+            'start_time': datetime.now().isoformat()
+        }
+    else:
+        user_data_store[user_id]['question_index'] = 0
+        user_data_store[user_id]['answers'] = {}
     
     await query.edit_message_text("📝 Начинаем анкету...")
     return await send_question(context, user_id)
@@ -460,7 +486,10 @@ async def main_async():
             CallbackQueryHandler(start_quiz_callback, pattern="^start_quiz$")
         ],
         states={
-            START: [CallbackQueryHandler(start_quiz_callback, pattern="^start_quiz$")],
+            START: [
+                CallbackQueryHandler(start_quiz_callback, pattern="^start_quiz$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)
+            ],
             **quiz_states,
             GENERATE_NICHES: [
                 CallbackQueryHandler(handle_idea_selection, pattern="^(idea_|show_all|back_to_list|restart)$")
@@ -469,11 +498,12 @@ async def main_async():
         fallbacks=[
             CommandHandler('help', help_command),
             CommandHandler('reset', reset_command),
-            CommandHandler('status', status_command)
+            CommandHandler('status', status_command),
+            CommandHandler('cancel', lambda u, c: ConversationHandler.END)
         ],
         per_user=True,
         per_chat=True,
-        per_message=False  # Явно указываем, чтобы убрать warning
+        per_message=False
     )
     
     application.add_handler(conv_handler)
@@ -481,18 +511,20 @@ async def main_async():
     application.add_handler(CommandHandler('status', status_command))
     application.add_handler(CommandHandler('reset', reset_command))
     
-    # 4. Запускаем бота вручную
+    # 4. Запускаем бота
     logger.info("✅ Бот запускается...")
     
     try:
-        # Ручной запуск polling
+        # ВАЖНО: запускаем polling вручную
         await application.initialize()
         await application.start()
         await application.updater.start_polling()
         
         # Бесконечное ожидание
-        logger.info("✅ Бот успешно запущен!")
-        await asyncio.Future()  # Бесконечное ожидание
+        logger.info("✅ Бот успешно запущен и слушает команды!")
+        
+        # Создаем бесконечный Future чтобы бот не завершался
+        await asyncio.Future()
         
     except KeyboardInterrupt:
         logger.info("⏹️ Бот остановлен пользователем")
@@ -502,8 +534,8 @@ async def main_async():
     finally:
         # Корректно останавливаем
         try:
+            await application.updater.stop()
             await application.stop()
-            await application.shutdown()
         except:
             pass
         await http_runner.cleanup()
@@ -512,7 +544,7 @@ async def main_async():
 def main():
     """Главная функция запуска"""
     try:
-        # Старый стиль запуска для python-telegram-bot
+        # Используем старый стиль запуска для совместимости
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
@@ -524,13 +556,6 @@ def main():
     except Exception as e:
         logger.error(f"💥 Ошибка: {e}")
         raise
-    finally:
-        # Закрываем loop
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.stop()
-        if not loop.is_closed():
-            loop.close()
 
 # ==================== ЗАПУСК ПРОГРАММЫ ====================
 if __name__ == '__main__':
