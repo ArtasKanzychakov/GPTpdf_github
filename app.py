@@ -439,8 +439,8 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Сессия сброшена. /start")
 
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
-async def main():
-    """Главная функция запуска бота"""
+async def main_async():
+    """Асинхронная главная функция"""
     logger.info("🚀 Запуск бизнес-бота на Render...")
     
     # 1. Запускаем health check сервер
@@ -472,7 +472,8 @@ async def main():
             CommandHandler('status', status_command)
         ],
         per_user=True,
-        per_chat=True
+        per_chat=True,
+        per_message=False  # Явно указываем, чтобы убрать warning
     )
     
     application.add_handler(conv_handler)
@@ -480,27 +481,57 @@ async def main():
     application.add_handler(CommandHandler('status', status_command))
     application.add_handler(CommandHandler('reset', reset_command))
     
-    # 4. Запускаем бота
+    # 4. Запускаем бота вручную
     logger.info("✅ Бот запускается...")
     
     try:
-        # Простой запуск polling
-        await application.run_polling()
+        # Ручной запуск polling
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+        
+        # Бесконечное ожидание
+        logger.info("✅ Бот успешно запущен!")
+        await asyncio.Future()  # Бесконечное ожидание
+        
     except KeyboardInterrupt:
-        logger.info("⏹️ Бот остановлен")
+        logger.info("⏹️ Бот остановлен пользователем")
     except Exception as e:
         logger.error(f"❌ Ошибка: {e}")
         raise
     finally:
+        # Корректно останавливаем
+        try:
+            await application.stop()
+            await application.shutdown()
+        except:
+            pass
         await http_runner.cleanup()
         logger.info("✅ Сервер остановлен")
 
-# ==================== ЗАПУСК ПРОГРАММЫ ====================
-if __name__ == '__main__':
-    # Простой запуск
+def main():
+    """Главная функция запуска"""
     try:
-        asyncio.run(main())
+        # Старый стиль запуска для python-telegram-bot
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Запускаем асинхронную функцию
+        loop.run_until_complete(main_async())
+        
     except KeyboardInterrupt:
         logger.info("⏹️ Бот остановлен")
     except Exception as e:
         logger.error(f"💥 Ошибка: {e}")
+        raise
+    finally:
+        # Закрываем loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.stop()
+        if not loop.is_closed():
+            loop.close()
+
+# ==================== ЗАПУСК ПРОГРАММЫ ====================
+if __name__ == '__main__':
+    main()
