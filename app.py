@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Бизнес-навигатор: Telegram бот для подбора бизнес-идей
-Версия 3.2 - Используем requests вместо httpx для совместимости
+Версия 3.3 - Упрощенный код, исправлены синтаксические ошибки
 """
 
 import os
@@ -31,10 +31,7 @@ from aiohttp import web
 # ==================== НАСТРОЙКА ЛОГИРОВАНИЯ ====================
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.StreamHandler()
-    ]
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
@@ -84,7 +81,7 @@ class UserProfile:
 
 user_sessions: Dict[int, UserProfile] = {}
 
-# ==================== OPENAI ИНТЕГРАЦИЯ (с requests) ====================
+# ==================== OPENAI ИНТЕГРАЦИЯ ====================
 class OpenAIService:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
@@ -92,14 +89,18 @@ class OpenAIService:
         logger.info(f"🔌 OpenAI статус: {'Доступен' if self.is_available else 'Не доступен'}")
     
     def _create_ideas_prompt(self, answers: Dict[int, str]) -> str:
-        """Создание промта для генерации идей"""
-        context = "\n".join([
-            f"Вопрос: {QUESTIONS[i].split('*')[1].strip() if '*' in QUESTIONS[i] else QUESTIONS[i][:50]}",
-            f"Ответ: {answer}"
-            for i, answer in answers.items()
-        ])
+        """Создание промта для генерации идей (исправленная версия)"""
+        context_lines = []
         
-        return f"""Ты - профессиональный бизнес-консультант. На основе профиля пользователя предложи 5 КОНКРЕТНЫХ бизнес-идей.
+        for i, answer in answers.items():
+            # Упрощенная версия без сложных f-строк
+            question_text = self._extract_question_text(i)
+            context_lines.append(f"Вопрос {i+1}: {question_text}")
+            context_lines.append(f"Ответ: {answer}")
+        
+        context = "\n".join(context_lines)
+        
+        prompt = """Ты - профессиональный бизнес-консультант. На основе профиля пользователя предложи 5 КОНКРЕТНЫХ бизнес-идей.
 
 ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:
 {context}
@@ -126,27 +127,48 @@ class OpenAIService:
 }}
 
 ТОЛЬКО JSON, без лишнего текста."""
-
+        
+        return prompt.format(context=context)
+    
+    def _extract_question_text(self, index: int) -> str:
+        """Извлечение текста вопроса"""
+        if index >= len(QUESTIONS):
+            return f"Вопрос {index+1}"
+        
+        question = QUESTIONS[index]
+        # Упрощенная логика извлечения
+        parts = question.split('*')
+        if len(parts) > 1:
+            return parts[1].strip()
+        return question[:50]
+    
     def _create_plan_prompt(self, answers: Dict[int, str], idea: BusinessIdea) -> str:
         """Создание промта для бизнес-плана"""
-        key_info = {
-            "Город": answers.get(0, "не указан"),
-            "Бюджет": answers.get(7, "не указан"),
-            "Время в неделю": answers.get(8, "не указано"),
-            "Риск": answers.get(10, "не указан"),
-            "Формат": answers.get(11, "не указан")
-        }
+        # Упрощенное извлечение данных
+        key_info = []
         
-        info_str = "\n".join([f"{k}: {v}" for k, v in key_info.items()])
+        city = answers.get(0, "не указан")
+        budget = answers.get(7, "не указан")
+        time_per_week = answers.get(8, "не указано")
+        risk = answers.get(10, "не указан")
+        format_type = answers.get(11, "не указан")
         
-        return f"""Создай ДЕТАЛЬНЫЙ бизнес-план для этой идеи:
+        key_info.append(f"Город: {city}")
+        key_info.append(f"Бюджет: {budget}")
+        key_info.append(f"Время в неделю: {time_per_week}")
+        key_info.append(f"Риск: {risk}")
+        key_info.append(f"Формат: {format_type}")
+        
+        info_str = "\n".join(key_info)
+        
+        prompt = """Создай ДЕТАЛЬНЫЙ бизнес-план для этой идеи:
 
-ИДЕЯ: {idea.title}
-ОПИСАНИЕ: {idea.description}
-ПОЧЕМУ ПОДХОДИТ: {idea.suitability}
+ИДЕЯ: {title}
+ОПИСАНИЕ: {description}
+ПОЧЕМУ ПОДХОДИТ: {suitability}
 
 ДАННЫЕ ПОЛЬЗОВАТЕЛЯ:
-{info_str}
+{user_info}
 
 СТРУКТУРА ПЛАНА (на русском, Markdown):
 1. **Краткое резюме** - суть бизнеса
@@ -158,7 +180,14 @@ class OpenAIService:
 7. **Пошаговый план на 3 месяца** - конкретные действия по неделям
 
 Сделай план практичным, с цифрами и конкретными шагами."""
-
+        
+        return prompt.format(
+            title=idea.title,
+            description=idea.description,
+            suitability=idea.suitability,
+            user_info=info_str
+        )
+    
     async def generate_business_ideas(self, answers: Dict[int, str]) -> Optional[List[BusinessIdea]]:
         """Генерация бизнес-идей через OpenAI"""
         if not self.is_available:
@@ -199,7 +228,7 @@ class OpenAIService:
                     ideas_data = json.loads(json_str)
                     
                     ideas = []
-                    for idea_data in ideas_data.get("ideas", [])[:5]:  # Берем максимум 5
+                    for idea_data in ideas_data.get("ideas", [])[:5]:
                         ideas.append(BusinessIdea(
                             id=idea_data.get("id", len(ideas) + 1),
                             title=idea_data.get("title", "Без названия"),
@@ -216,7 +245,7 @@ class OpenAIService:
         except Exception as e:
             logger.error(f"❌ Ошибка генерации идей: {e}")
             return None
-
+    
     async def generate_business_plan(self, answers: Dict[int, str], idea: BusinessIdea) -> Optional[str]:
         """Генерация бизнес-плана через OpenAI"""
         if not self.is_available:
@@ -260,17 +289,7 @@ class OpenAIService:
 # Глобальный сервис OpenAI
 openai_service = OpenAIService()
 
-# ==================== ОСТАЛЬНЫЙ КОД ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ ====================
-# [Здесь идет весь остальной код из предыдущей версии - обработчики start, start_questionnaire,
-# handle_questionnaire_answer, generate_business_ideas, generate_fallback_ideas, 
-# show_current_idea, navigate_ideas, select_idea, generate_fallback_plan,
-# show_business_plan, pdf_soon, back_to_ideas, back_to_start, cancel,
-# health_check, run_health_server, main]
-
-# ... [Вставьте сюда весь остальной код из предыдущего сообщения, начиная с async def start]
-# ... [кроме кода в классе OpenAIService, который мы уже обновили выше]
-
-# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ (краткая версия для экономии места) ====================
+# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
@@ -281,10 +300,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ai_enabled=openai_service.is_available
     )
     
-    ai_status = "✅ (AI-режим)" if openai_service.is_available else "⚠️ (Базовый режим)"
+    ai_status = ""
+    if openai_service.is_available:
+        ai_status = "✅ (AI-режим)"
+    else:
+        ai_status = "⚠️ (Базовый режим)"
     
-    welcome_text = f"""
-👋 *Добро пожаловать в Бизнес-Навигатор!* {ai_status}
+    welcome_text = f"""👋 *Добро пожаловать в Бизнес-Навигатор!* {ai_status}
 
 Я помогу найти бизнес-идею на основе ваших навыков.
 
@@ -295,8 +317,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ⏱️ *Время:* 5-10 минут
 
-🚀 *Готовы начать?*
-"""
+🚀 *Готовы начать?*"""
     
     keyboard = [[InlineKeyboardButton("📋 Начать анкету", callback_data='start_questionnaire')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -356,7 +377,10 @@ async def handle_questionnaire_answer(update: Update, context: ContextTypes.DEFA
     
     # Показываем следующий вопрос
     next_q_num = profile.current_question + 1
-    progress = "🟢" * (profile.current_question) + "⚪" * (len(QUESTIONS) - profile.current_question)
+    completed = profile.current_question
+    remaining = len(QUESTIONS) - profile.current_question
+    
+    progress = "🟢" * completed + "⚪" * remaining
     
     await update.message.reply_text(
         f"{progress}\n✅ *Ответ сохранен!*\n*Вопрос {next_q_num} из {len(QUESTIONS)}*\n\n{QUESTIONS[profile.current_question]}\n\n✏️ *Напишите ответ:*",
@@ -380,7 +404,11 @@ async def generate_business_ideas_wrapper(update: Update, context: ContextTypes.
     if profile.ai_enabled and openai_service.is_available:
         loading_msg = await update.message.reply_text("🧠 *Генерирую персонализированные идеи через AI...*", parse_mode='Markdown')
         ai_ideas = await openai_service.generate_business_ideas(profile.answers)
-        await context.bot.delete_message(chat_id=user_id, message_id=loading_msg.message_id)
+        if loading_msg:
+            try:
+                await context.bot.delete_message(chat_id=user_id, message_id=loading_msg.message_id)
+            except:
+                pass
     
     # Если AI не сработал - базовые идеи
     if not ai_ideas:
@@ -444,8 +472,7 @@ async def show_current_idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
     idea = profile.business_ideas[profile.current_idea_index]
     total_ideas = len(profile.business_ideas)
     
-    text = f"""
-🎯 *ИДЕЯ {profile.current_idea_index + 1} из {total_ideas}*
+    text = f"""🎯 *ИДЕЯ {profile.current_idea_index + 1} из {total_ideas}*
 
 *{idea.title}*
 
@@ -453,8 +480,7 @@ async def show_current_idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {idea.description}
 
 ✅ *Почему вам подходит:*
-{idea.suitability}
-"""
+{idea.suitability}"""
     
     # Кнопки навигации
     keyboard = []
@@ -525,7 +551,10 @@ async def select_idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     
     # Извлекаем индекс идеи
-    idea_index = int(query.data.split('_')[-1])
+    try:
+        idea_index = int(query.data.split('_')[-1])
+    except:
+        idea_index = 0
     
     if idea_index < 0 or idea_index >= len(profile.business_ideas):
         await query.edit_message_text("❌ Неверный индекс идеи")
@@ -557,8 +586,7 @@ def generate_fallback_plan(answers: Dict[int, str], idea: BusinessIdea) -> str:
     city = answers.get(0, "вашем городе")
     budget = answers.get(7, "50,000 рублей")
     
-    return f"""
-# 📈 БИЗНЕС-ПЛАН: {idea.title}
+    plan = f"""# 📈 БИЗНЕС-ПЛАН: {idea.title}
 
 ## 🎯 Краткое резюме
 {idea.description}
@@ -605,8 +633,9 @@ def generate_fallback_plan(answers: Dict[int, str], idea: BusinessIdea) -> str:
 ### Месяц 3: Развитие
 1. Запустить таргетированную рекламу
 2. Наладить регулярный поток заказов
-3. Оптимизировать процессы работы
-"""
+3. Оптимизировать процессы работы"""
+    
+    return plan
 
 async def show_business_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать бизнес-план"""
@@ -635,13 +664,11 @@ async def show_business_plan(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parts.append(plan_text)
     
     # Отправляем первую часть с кнопками
-    text = f"""
-🎯 *ДЕТАЛЬНЫЙ БИЗНЕС-ПЛАН*
+    text = f"""🎯 *ДЕТАЛЬНЫЙ БИЗНЕС-ПЛАН*
 
 *{profile.selected_idea.title}*
 
-{parts[0]}
-"""
+{parts[0]}"""
     
     keyboard = [
         [InlineKeyboardButton("📄 Скачать PDF (скоро)", callback_data='pdf_soon')],
@@ -655,11 +682,14 @@ async def show_business_plan(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     # Отправляем остальные части
     for part in parts[1:]:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=part,
-            parse_mode='Markdown'
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=part,
+                parse_mode='Markdown'
+            )
+        except:
+            pass
     
     return BUSINESS_PLAN_STATE
 
@@ -669,10 +699,7 @@ async def pdf_soon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     await query.edit_message_text(
-        "📄 *PDF-функция в разработке*\n\n"
-        "Скоро вы сможете скачать красивый PDF с вашим бизнес-планом!\n\n"
-        "А пока можете скопировать текст плана из сообщений выше.\n\n"
-        "Для нового поиска нажмите /start",
+        "📄 *PDF-функция в разработке*\n\nСкоро вы сможете скачать красивый PDF с вашим бизнес-планом!\n\nА пока можете скопировать текст плана из сообщений выше.\n\nДля нового поиска нажмите /start",
         parse_mode='Markdown'
     )
     
@@ -729,7 +756,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def health_check(request):
     status = {
         "status": "OK",
-        "version": "3.2",
+        "version": "3.3",
         "openai_available": openai_service.is_available,
         "active_sessions": len(user_sessions)
     }
@@ -763,7 +790,7 @@ async def main():
         logger.error("❌ TELEGRAM_TOKEN не найден!")
         return
     
-    logger.info(f"🚀 Запуск Бизнес-бота v3.2 (OpenAI: {openai_service.is_available})")
+    logger.info(f"🚀 Запуск Бизнес-бота v3.3 (OpenAI: {openai_service.is_available})")
     
     # Создаем приложение
     application = Application.builder().token(token).build()
