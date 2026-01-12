@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Бизнес-навигатор: Telegram бот для подбора бизнес-идей
-Версия 3.3 - Упрощенный код, исправлены синтаксические ошибки
+Версия 4.0 - Креативные идеи, детальные планы, мониторинг токенов
 """
 
 import os
@@ -10,9 +10,11 @@ import logging
 import asyncio
 import json
 import re
+import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
+from enum import Enum
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -40,6 +42,10 @@ QUESTIONNAIRE_STATE = 1
 BUSINESS_IDEAS_STATE = 2
 BUSINESS_PLAN_STATE = 3
 
+class IdeaType(Enum):
+    NORMAL = "normal"
+    CREATIVE = "creative"
+
 QUESTIONS = [
     "🏙️ *В каком городе или регионе вы живете?*\n_Например: Москва, Санкт-Петербург, Новосибирск_",
     "🎓 *Какое у вас образование, курсы или сертификаты?*\n_Например: Высшее экономическое, курсы маркетинга_",
@@ -66,6 +72,48 @@ class BusinessIdea:
     title: str
     description: str
     suitability: str
+    idea_type: IdeaType = IdeaType.NORMAL
+    creativity_level: int = 5  # 1-10
+
+@dataclass
+class TokenUsage:
+    total_tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    estimated_cost: float = 0.0
+    last_reset: datetime = field(default_factory=datetime.now)
+    
+    def add_usage(self, prompt_tokens: int, completion_tokens: int):
+        self.prompt_tokens += prompt_tokens
+        self.completion_tokens += completion_tokens
+        self.total_tokens = self.prompt_tokens + self.completion_tokens
+        # Примерная стоимость: $0.002 за 1K токенов для GPT-3.5
+        self.estimated_cost = self.total_tokens * 0.002 / 1000
+    
+    def get_usage_percentage(self, max_tokens: int = 100000) -> float:
+        """Возвращает процент использованных токенов"""
+        if max_tokens <= 0:
+            return 0.0
+        percentage = (self.total_tokens / max_tokens) * 100
+        return min(percentage, 100.0)
+    
+    def get_remaining_percentage(self, max_tokens: int = 100000) -> float:
+        return max(0.0, 100.0 - self.get_usage_percentage(max_tokens))
+    
+    def get_usage_bar(self, max_tokens: int = 100000) -> str:
+        """Возвращает прогресс-бар использования токенов"""
+        used_percent = self.get_usage_percentage(max_tokens)
+        used_blocks = int(used_percent / 10)
+        remaining_blocks = 10 - used_blocks
+        
+        bar = "🟢" * used_blocks + "⚪" * remaining_blocks
+        
+        if used_percent >= 80:
+            bar = "🔴" * used_blocks + "⚪" * remaining_blocks
+        elif used_percent >= 50:
+            bar = "🟡" * used_blocks + "⚪" * remaining_blocks
+        
+        return f"{bar} {used_percent:.1f}%"
 
 @dataclass
 class UserProfile:
@@ -78,8 +126,10 @@ class UserProfile:
     selected_idea: Optional[BusinessIdea] = None
     business_plan: str = ""
     ai_enabled: bool = True
+    show_creative_ideas: bool = False
 
 user_sessions: Dict[int, UserProfile] = {}
+token_usage = TokenUsage()
 
 # ==================== OPENAI ИНТЕГРАЦИЯ ====================
 class OpenAIService:
@@ -88,47 +138,163 @@ class OpenAIService:
         self.is_available = bool(self.api_key)
         logger.info(f"🔌 OpenAI статус: {'Доступен' if self.is_available else 'Не доступен'}")
     
-    def _create_ideas_prompt(self, answers: Dict[int, str]) -> str:
-        """Создание промта для генерации идей (исправленная версия)"""
+    def _create_ideas_prompt(self, answers: Dict[int, str], idea_type: IdeaType = IdeaType.NORMAL) -> str:
+        """Создание промта для генерации идей с разным уровнем креативности"""
         context_lines = []
         
         for i, answer in answers.items():
-            # Упрощенная версия без сложных f-строк
             question_text = self._extract_question_text(i)
             context_lines.append(f"Вопрос {i+1}: {question_text}")
             context_lines.append(f"Ответ: {answer}")
         
         context = "\n".join(context_lines)
         
-        prompt = """Ты - профессиональный бизнес-консультант. На основе профиля пользователя предложи 5 КОНКРЕТНЫХ бизнес-идей.
+        creativity_instruction = ""
+        if idea_type == IdeaType.CREATIVE:
+            creativity_instruction = """
+ТРЕБОВАНИЯ К КРЕАТИВНОСТИ:
+1. Идеи должны быть НЕОБЫЧНЫМИ, но реалистичными
+2. Используй нестандартные комбинации навыков и интересов
+3. Предложи уникальные форматы монетизации
+4. Включи элементы геймификации, сообщества или подписочной модели
+5. Идеи должны вызывать "ВАУ-эффект" но оставаться выполнимыми
+"""
+        else:
+            creativity_instruction = """
+ТРЕБОВАНИЯ:
+1. Идеи должны быть ПРАКТИЧНЫМИ и выполнимыми
+2. Учитывай бюджет, навыки, интересы и местоположение
+3. Сделай акцент на быстром старте и низких рисках
+"""
+        
+        prompt = f"""Ты - креативный бизнес-консультант с 20-летним опытом. На основе профиля пользователя предложи 10 бизнес-идей.
 
 ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:
 {context}
 
-ТРЕБОВАНИЯ:
-1. Каждая идея должна быть реалистичной для этого человека
-2. Учитывай бюджет, навыки, интересы и местоположение
-3. Идеи должны быть разными по формату
-4. Для каждой идеи укажи:
-   - Название (кратко, 3-7 слов)
-   - Описание (2-3 предложения, что конкретно делать)
-   - Почему подходит (1 предложение, связь с профилем)
+{creativity_instruction}
 
-ВЕРНИ ТОЛЬКО JSON в таком формате:
+ФОРМАТ ВЫВОДА ТОЛЬКО JSON:
 {{
   "ideas": [
     {{
       "id": 1,
-      "title": "Название идеи",
-      "description": "Описание что делать",
-      "suitability": "Почему подходит пользователю"
+      "title": "Название идеи (максимум 7 слов)",
+      "description": "Краткое описание 2-3 предложения",
+      "suitability": "Почему подходит именно этому пользователю (1 предложение)",
+      "creativity_level": 7,
+      "idea_type": "{idea_type.value}"
     }}
   ]
 }}
 
+ДЛЯ ВСЕХ ИДЕЙ УКАЖИ creativity_level от 1 до 10, где 10 - максимально креативная.
+
 ТОЛЬКО JSON, без лишнего текста."""
         
-        return prompt.format(context=context)
+        return prompt
+    
+    def _create_detailed_plan_prompt(self, answers: Dict[int, str], idea: BusinessIdea) -> str:
+        """Создание промта для ДЕТАЛЬНОГО бизнес-плана"""
+        key_info = {
+            "Город": answers.get(0, "не указан"),
+            "Бюджет": answers.get(7, "не указан"),
+            "Время в неделю": answers.get(8, "не указано"),
+            "Риск": answers.get(10, "не указан"),
+            "Формат": answers.get(11, "не указан"),
+            "Сроки": answers.get(13, "не указаны"),
+            "Цели": answers.get(14, "не указаны")
+        }
+        
+        info_str = "\n".join([f"{k}: {v}" for k, v in key_info.items()])
+        
+        prompt = f"""Создай ПОЛНЫЙ И ДЕТАЛЬНЫЙ бизнес-план для этой идеи:
+
+🎯 ИДЕЯ: {idea.title}
+📝 ОПИСАНИЕ: {idea.description}
+✅ ПОДХОДИТ ПОТОМУ ЧТО: {idea.suitability}
+🎨 УРОВЕНЬ КРЕАТИВНОСТИ: {idea.creativity_level}/10
+
+📊 ДАННЫЕ ПОЛЬЗОВАТЕЛЬКА:
+{info_str}
+
+📋 ТРЕБУЕМАЯ СТРУКТУРА ПЛАНА (Markdown на русском):
+
+## 1. 🎯 Краткое резюме бизнеса
+- Суть проекта в 3-4 предложениях
+- Уникальное торговое предложение
+- Ценность для клиентов
+
+## 2. 📈 Анализ рынка и конкуренции
+- Размер рынка в регионе
+- Основные конкуренты и их слабые стороны
+- Незанятая ниша
+- Тренды и перспективы роста
+
+## 3. 🎯 Целевая аудитория (3 сегмента)
+- Демография, интересы, боли
+- Где искать клиентов
+- Средний чек и частота покупок
+
+## 4. 📱 Маркетинг-план на 6 месяцев
+### Месяц 1-2: Запуск
+### Месяц 3-4: Рост
+### Месяц 5-6: Стабилизация
+(конкретные каналы, бюджет, KPI)
+
+## 5. ⚙️ Операционный план
+- Ежедневные процессы
+- Необходимое оборудование/софт
+- Требования к помещению (если нужно)
+- Юридические аспекты
+
+## 6. 💰 ФИНАНСОВЫЙ ПЛАН (САМОЕ ВАЖНОЕ!)
+### Стартовые инвестиции:
+- Оборудование: XXX руб
+- Регистрация: XXX руб
+- Первая реклама: XXX руб
+- Резервный фонд: XXX руб
+- **ИТОГО: XXX руб**
+
+### Ежемесячные расходы:
+- Аренда: XXX руб
+- Реклама: XXX руб
+- Зарплаты: XXX руб
+- Налоги: XXX руб
+- **ИТОГО: XXX руб/мес**
+
+### План доходов:
+- **Выход в ноль (break-even):** Через X месяцев
+- **Доход 50,000 руб/мес:** Через Y месяцев
+- **Доход 100,000 руб/мес:** Через Z месяцев
+
+### Детальный план на 12 месяцев:
+| Месяц | Расходы | Доходы | Прибыль | Накоплено |
+|-------|---------|--------|---------|-----------|
+| 1     | XXX     | XXX    | -XXX    | -XXX      |
+| 2     | XXX     | XXX    | -XXX    | -XXX      |
+| ... продолжай до месяца 12 ...
+
+## 7. 🚀 Пошаговый план запуска (первые 30 дней)
+### Неделя 1: Подготовка
+### Неделя 2: Создание активов
+### Неделя 3: Тестовые продажи
+### Неделя 4: Анализ и корректировка
+(конкретные задачи по дням)
+
+## 8. ⚠️ Риски и их минимизация
+- Основные риски (финансовые, операционные, рыночные)
+- Стратегии минимизации каждого риска
+- План Б на случай провала
+
+## 9. 📈 Показатели успеха (KPI)
+- Ежедневные/еженедельные/ежемесячные метрики
+- Критические точки контроля
+- Когда масштабироваться
+
+💡 Сделай план максимально практичным, с конкретными цифрами и сроками. Используй таблицы где это уместно."""
+        
+        return prompt
     
     def _extract_question_text(self, index: int) -> str:
         """Извлечение текста вопроса"""
@@ -136,60 +302,13 @@ class OpenAIService:
             return f"Вопрос {index+1}"
         
         question = QUESTIONS[index]
-        # Упрощенная логика извлечения
         parts = question.split('*')
         if len(parts) > 1:
             return parts[1].strip()
         return question[:50]
     
-    def _create_plan_prompt(self, answers: Dict[int, str], idea: BusinessIdea) -> str:
-        """Создание промта для бизнес-плана"""
-        # Упрощенное извлечение данных
-        key_info = []
-        
-        city = answers.get(0, "не указан")
-        budget = answers.get(7, "не указан")
-        time_per_week = answers.get(8, "не указано")
-        risk = answers.get(10, "не указан")
-        format_type = answers.get(11, "не указан")
-        
-        key_info.append(f"Город: {city}")
-        key_info.append(f"Бюджет: {budget}")
-        key_info.append(f"Время в неделю: {time_per_week}")
-        key_info.append(f"Риск: {risk}")
-        key_info.append(f"Формат: {format_type}")
-        
-        info_str = "\n".join(key_info)
-        
-        prompt = """Создай ДЕТАЛЬНЫЙ бизнес-план для этой идеи:
-
-ИДЕЯ: {title}
-ОПИСАНИЕ: {description}
-ПОЧЕМУ ПОДХОДИТ: {suitability}
-
-ДАННЫЕ ПОЛЬЗОВАТЕЛЯ:
-{user_info}
-
-СТРУКТУРА ПЛАНА (на русском, Markdown):
-1. **Краткое резюме** - суть бизнеса
-2. **Анализ рынка** - спрос, конкуренты, ниша
-3. **Целевая аудитория** - кто будет покупать
-4. **Маркетинг-план** - как привлекать клиентов
-5. **Операционный план** - ежедневные процессы
-6. **Финансовый план** - стартовые затраты, доходы, окупаемость
-7. **Пошаговый план на 3 месяца** - конкретные действия по неделям
-
-Сделай план практичным, с цифрами и конкретными шагами."""
-        
-        return prompt.format(
-            title=idea.title,
-            description=idea.description,
-            suitability=idea.suitability,
-            user_info=info_str
-        )
-    
-    async def generate_business_ideas(self, answers: Dict[int, str]) -> Optional[List[BusinessIdea]]:
-        """Генерация бизнес-идей через OpenAI"""
+    async def generate_business_ideas(self, answers: Dict[int, str], idea_type: IdeaType = IdeaType.NORMAL) -> Optional[List[BusinessIdea]]:
+        """Генерация бизнес-идей через OpenAI с отслеживанием токенов"""
         if not self.is_available:
             logger.warning("OpenAI не доступен, использую запасные идеи")
             return None
@@ -197,8 +316,9 @@ class OpenAIService:
         try:
             import requests
             
-            prompt = self._create_ideas_prompt(answers)
+            prompt = self._create_ideas_prompt(answers, idea_type)
             
+            start_time = time.time()
             response = requests.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
@@ -206,20 +326,33 @@ class OpenAIService:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "gpt-3.5-turbo",
+                    "model": "gpt-4-turbo-preview",  # Используем GPT-4 для креативности
                     "messages": [
-                        {"role": "system", "content": "Ты - бизнес-консультант."},
+                        {"role": "system", "content": "Ты - креативный бизнес-консультант с 20-летним опытом."},
                         {"role": "user", "content": prompt}
                     ],
-                    "temperature": 0.7,
-                    "max_tokens": 1500
+                    "temperature": 0.8 if idea_type == IdeaType.CREATIVE else 0.7,
+                    "max_tokens": 3000,
+                    "top_p": 0.9
                 },
-                timeout=30
+                timeout=45
             )
+            
+            elapsed_time = time.time() - start_time
             
             if response.status_code == 200:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
+                
+                # Отслеживаем использование токенов
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+                
+                token_usage.add_usage(prompt_tokens, completion_tokens)
+                
+                logger.info(f"📊 Токены: +{completion_tokens} (prompt: {prompt_tokens}), всего: {token_usage.total_tokens}")
+                logger.info(f"⏱️ Время генерации: {elapsed_time:.2f} сек")
                 
                 # Извлекаем JSON из ответа
                 json_match = re.search(r'\{[\s\S]*\}', content)
@@ -228,15 +361,17 @@ class OpenAIService:
                     ideas_data = json.loads(json_str)
                     
                     ideas = []
-                    for idea_data in ideas_data.get("ideas", [])[:5]:
+                    for idea_data in ideas_data.get("ideas", [])[:10]:  # Берем максимум 10
                         ideas.append(BusinessIdea(
                             id=idea_data.get("id", len(ideas) + 1),
                             title=idea_data.get("title", "Без названия"),
                             description=idea_data.get("description", ""),
-                            suitability=idea_data.get("suitability", "")
+                            suitability=idea_data.get("suitability", ""),
+                            idea_type=IdeaType(idea_data.get("idea_type", "normal")),
+                            creativity_level=idea_data.get("creativity_level", 5)
                         ))
                     
-                    logger.info(f"✅ Сгенерировано {len(ideas)} AI-идей")
+                    logger.info(f"✅ Сгенерировано {len(ideas)} {idea_type.value} идей")
                     return ideas
             
             logger.error(f"❌ OpenAI ошибка: {response.status_code}")
@@ -246,16 +381,17 @@ class OpenAIService:
             logger.error(f"❌ Ошибка генерации идей: {e}")
             return None
     
-    async def generate_business_plan(self, answers: Dict[int, str], idea: BusinessIdea) -> Optional[str]:
-        """Генерация бизнес-плана через OpenAI"""
+    async def generate_detailed_business_plan(self, answers: Dict[int, str], idea: BusinessIdea) -> Optional[str]:
+        """Генерация детального бизнес-плана через OpenAI"""
         if not self.is_available:
             return None
         
         try:
             import requests
             
-            prompt = self._create_plan_prompt(answers, idea)
+            prompt = self._create_detailed_plan_prompt(answers, idea)
             
+            start_time = time.time()
             response = requests.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={
@@ -263,21 +399,35 @@ class OpenAIService:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "gpt-3.5-turbo",
+                    "model": "gpt-4-turbo-preview",
                     "messages": [
-                        {"role": "system", "content": "Ты - бизнес-планировщик."},
+                        {"role": "system", "content": "Ты - опытный бизнес-планировщик с финансовым образованием."},
                         {"role": "user", "content": prompt}
                     ],
                     "temperature": 0.5,
-                    "max_tokens": 2000
+                    "max_tokens": 4000,
+                    "top_p": 0.8
                 },
-                timeout=45
+                timeout=60
             )
+            
+            elapsed_time = time.time() - start_time
             
             if response.status_code == 200:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"]
-                logger.info("✅ Бизнес-план сгенерирован через AI")
+                
+                # Отслеживаем использование токенов
+                usage = data.get("usage", {})
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+                
+                token_usage.add_usage(prompt_tokens, completion_tokens)
+                
+                logger.info(f"📊 Токены плана: +{completion_tokens} (prompt: {prompt_tokens})")
+                logger.info(f"⏱️ Время генерации плана: {elapsed_time:.2f} сек")
+                logger.info("✅ Детальный бизнес-план сгенерирован через AI")
+                
                 return content
             
             return None
@@ -291,7 +441,7 @@ openai_service = OpenAIService()
 
 # ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
+    """Обработчик команды /start с отображением использования токенов"""
     user = update.effective_user
     user_id = user.id
     
@@ -303,21 +453,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ai_status = ""
     if openai_service.is_available:
         ai_status = "✅ (AI-режим)"
+        # Показываем использование токенов
+        token_bar = token_usage.get_usage_bar()
+        token_info = f"\n📊 *Использование токенов:* {token_bar}"
+        token_info += f"\n💰 *Примерная стоимость:* ${token_usage.estimated_cost:.4f}"
+        token_info += f"\n🎯 *Осталось:* {token_usage.get_remaining_percentage():.1f}%"
     else:
         ai_status = "⚠️ (Базовый режим)"
+        token_info = ""
     
-    welcome_text = f"""👋 *Добро пожаловать в Бизнес-Навигатор!* {ai_status}
+    welcome_text = f"""👋 *Добро пожаловать в Бизнес-Навигатор 4.0!* {ai_status}
 
-Я помогу найти бизнес-идею на основе ваших навыков.
+🎯 *Новые возможности:*
+• 10 бизнес-идей (5 практичных + 5 креативных)
+• Детальные финансовые планы с точными сроками
+• План выхода на доход 50,000₽ и 100,000₽ в месяц
+• Пошаговые инструкции на 12 месяцев
 
-📋 *Что я сделаю:*
-1. Задам 16 простых вопросов
-2. Сгенерирую 5 ПЕРСОНАЛИЗИРОВАННЫХ идей
-3. Подробно распишу план для выбранной идеи
+⏱️ *Время:* 10-15 минут
 
-⏱️ *Время:* 5-10 минут
-
-🚀 *Готовы начать?*"""
+🚀 *Готовы найти свою идею?*{token_info}"""
     
     keyboard = [[InlineKeyboardButton("📋 Начать анкету", callback_data='start_questionnaire')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -390,7 +545,7 @@ async def handle_questionnaire_answer(update: Update, context: ContextTypes.DEFA
     return QUESTIONNAIRE_STATE
 
 async def generate_business_ideas_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обертка для генерации идей"""
+    """Генерация идей (нормальные + креативные)"""
     user_id = update.effective_user.id
     
     if user_id not in user_sessions:
@@ -399,24 +554,56 @@ async def generate_business_ideas_wrapper(update: Update, context: ContextTypes.
     
     profile = user_sessions[user_id]
     
-    # Пытаемся сгенерировать через AI
-    ai_ideas = None
+    # Показываем статус генерации
+    loading_msg = await update.message.reply_text(
+        "🧠 *Генерирую 10 бизнес-идей...*\n"
+        "• 5 практичных идей\n"
+        "• 5 креативных идей\n\n"
+        "⏳ *Это займет 30-45 секунд*",
+        parse_mode='Markdown'
+    )
+    
+    # Генерируем нормальные идеи
+    normal_ideas = None
     if profile.ai_enabled and openai_service.is_available:
-        loading_msg = await update.message.reply_text("🧠 *Генерирую персонализированные идеи через AI...*", parse_mode='Markdown')
-        ai_ideas = await openai_service.generate_business_ideas(profile.answers)
-        if loading_msg:
-            try:
-                await context.bot.delete_message(chat_id=user_id, message_id=loading_msg.message_id)
-            except:
-                pass
+        normal_ideas = await openai_service.generate_business_ideas(
+            profile.answers, 
+            IdeaType.NORMAL
+        )
+    
+    # Генерируем креативные идеи
+    creative_ideas = None
+    if profile.ai_enabled and openai_service.is_available:
+        creative_ideas = await openai_service.generate_business_ideas(
+            profile.answers, 
+            IdeaType.CREATIVE
+        )
+    
+    # Объединяем идеи
+    all_ideas = []
+    
+    if normal_ideas:
+        all_ideas.extend(normal_ideas[:5])  # Берем 5 нормальных
+    
+    if creative_ideas:
+        all_ideas.extend(creative_ideas[:5])  # Берем 5 креативных
     
     # Если AI не сработал - базовые идеи
-    if not ai_ideas:
-        profile.business_ideas = generate_fallback_ideas(profile.answers)
+    if not all_ideas:
+        all_ideas = generate_fallback_ideas(profile.answers)
         logger.info(f"📝 Использованы базовые идеи для пользователя {user_id}")
     else:
-        profile.business_ideas = ai_ideas
         logger.info(f"🤖 Использованы AI-идеи для пользователя {user_id}")
+        logger.info(f"📊 Итого идей: {len(all_ideas)} ({len([i for i in all_ideas if i.idea_type == IdeaType.NORMAL])} нормальных + "
+                   f"{len([i for i in all_ideas if i.idea_type == IdeaType.CREATIVE])} креативных)")
+    
+    profile.business_ideas = all_ideas
+    
+    # Удаляем сообщение о загрузке
+    try:
+        await context.bot.delete_message(chat_id=user_id, message_id=loading_msg.message_id)
+    except:
+        pass
     
     # Показываем первую идею
     return await show_current_idea(update, context)
@@ -426,42 +613,94 @@ def generate_fallback_ideas(answers: Dict[int, str]) -> List[BusinessIdea]:
     city = answers.get(0, "вашем городе")
     
     ideas = [
+        # Нормальные идеи
         BusinessIdea(
             id=1,
             title=f"Контент-услуги в {city}",
-            description="Создание фото, видео и текстов для местного бизнеса и блогеров. Редактирование, монтаж, копирайтинг.",
-            suitability="Использует ваши технические и творческие навыки"
+            description="Создание фото, видео и текстов для местного бизнеса. Редактирование, монтаж, копирайтинг.",
+            suitability="Использует технические и творческие навыки",
+            idea_type=IdeaType.NORMAL,
+            creativity_level=3
         ),
         BusinessIdea(
             id=2,
-            title="Онлайн-консультации и обучение",
-            description="Проведение индивидуальных консультаций или групповых вебинаров по вашей профессиональной теме через Zoom/Telegram.",
-            suitability="Работа из дома, гибкий график, можно начать без вложений"
+            title="Онлайн-консультации",
+            description="Индивидуальные консультации по вашей профессиональной теме через Zoom/Telegram.",
+            suitability="Работа из дома, гибкий график",
+            idea_type=IdeaType.NORMAL,
+            creativity_level=4
         ),
         BusinessIdea(
             id=3,
             title=f"Услуги для дома в {city}",
-            description="Ремонтные работы, уборка, сборка мебели, мелкий ремонт техники. Востребованная ниша в любом городе.",
-            suitability="Постоянный спрос, можно начать с минимальным оборудованием"
+            description="Ремонтные работы, уборка, сборка мебели, мелкий ремонт техники.",
+            suitability="Постоянный спрос, можно начать с минимальным оборудованием",
+            idea_type=IdeaType.NORMAL,
+            creativity_level=3
         ),
         BusinessIdea(
             id=4,
             title="Образовательный Telegram-канал",
-            description="Создание платного канала с экспертной информацией по вашей теме. Уроки, чек-листы, консультации.",
-            suitability="Пассивный доход после настройки, низкие затраты"
+            description="Платный канал с экспертной информацией по вашей теме. Уроки, чек-листы.",
+            suitability="Пассивный доход после настройки",
+            idea_type=IdeaType.NORMAL,
+            creativity_level=5
         ),
         BusinessIdea(
             id=5,
             title=f"Посреднические услуги в {city}",
-            description="Соединение клиентов с исполнителями в вашей сфере знаний. Организация услуг, контроль качества, гарантии.",
-            suitability="Использование ваших профессиональных связей и знаний рынка"
+            description="Соединение клиентов с исполнителями в вашей сфере знаний.",
+            suitability="Использование профессиональных связей",
+            idea_type=IdeaType.NORMAL,
+            creativity_level=4
+        ),
+        # Креативные идеи
+        BusinessIdea(
+            id=6,
+            title="Киберспортивный лагерь для взрослых",
+            description="Организация турниров и тренировок по киберспорту для корпоративных клиентов.",
+            suitability="Сочетает интересы в технологиях и спорте",
+            idea_type=IdeaType.CREATIVE,
+            creativity_level=8
+        ),
+        BusinessIdea(
+            id=7,
+            title="Виртуальный ассистент по декларированию",
+            description="Помощь в заполнении налоговых деклараций через Telegram-бота с AI.",
+            suitability="Использует технические навыки и внимание к деталям",
+            idea_type=IdeaType.CREATIVE,
+            creativity_level=7
+        ),
+        BusinessIdea(
+            id=8,
+            title="Экологичная доставка на велосипедах",
+            description="Доставка продуктов и товаров на экологичном транспорте с подпиской.",
+            suitability="Сочетает здоровый образ жизни и предпринимательство",
+            idea_type=IdeaType.CREATIVE,
+            creativity_level=6
+        ),
+        BusinessIdea(
+            id=9,
+            title="Персонализированные аудио-гиды",
+            description="Создание аудио-экскурсий по городу с использованием AI для персонализации.",
+            suitability="Творческий подход к туризму и технологиям",
+            idea_type=IdeaType.CREATIVE,
+            creativity_level=9
+        ),
+        BusinessIdea(
+            id=10,
+            title="Онлайн-марафоны по хобби-монетизации",
+            description="28-дневные марафоны, где участники превращают хобби в источник дохода.",
+            suitability="Помогает другим и создает сообщество",
+            idea_type=IdeaType.CREATIVE,
+            creativity_level=7
         )
     ]
     
     return ideas
 
 async def show_current_idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать текущую бизнес-идею"""
+    """Показать текущую бизнес-идею с улучшенным оформлением"""
     user_id = update.effective_user.id
     profile = user_sessions[user_id]
     
@@ -472,7 +711,14 @@ async def show_current_idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
     idea = profile.business_ideas[profile.current_idea_index]
     total_ideas = len(profile.business_ideas)
     
-    text = f"""🎯 *ИДЕЯ {profile.current_idea_index + 1} из {total_ideas}*
+    # Определяем тип идеи
+    idea_type_emoji = "💡" if idea.idea_type == IdeaType.NORMAL else "✨"
+    idea_type_text = "Практичная идея" if idea.idea_type == IdeaType.NORMAL else "Креативная идея"
+    
+    # Шкала креативности
+    creativity_bar = "⭐" * idea.creativity_level + "☆" * (10 - idea.creativity_level)
+    
+    text = f"""🎯 *{idea_type_emoji} {idea_type_text} {profile.current_idea_index + 1} из {total_ideas}*
 
 *{idea.title}*
 
@@ -480,7 +726,9 @@ async def show_current_idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {idea.description}
 
 ✅ *Почему вам подходит:*
-{idea.suitability}"""
+{idea.suitability}
+
+🎨 *Уровень креативности:* {creativity_bar} ({idea.creativity_level}/10)"""
     
     # Кнопки навигации
     keyboard = []
@@ -498,9 +746,17 @@ async def show_current_idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if nav_buttons:
         keyboard.append(nav_buttons)
     
-    # Кнопки действий
-    keyboard.append([InlineKeyboardButton(f"✅ Выбрать эту идею", callback_data=f'select_idea_{profile.current_idea_index}')])
-    keyboard.append([InlineKeyboardButton("🔄 Другие идеи", callback_data='other_ideas')])
+    # Кнопка выбора с эмодзи в зависимости от типа идеи
+    select_emoji = "✅" if idea.idea_type == IdeaType.NORMAL else "🚀"
+    keyboard.append([InlineKeyboardButton(f"{select_emoji} Выбрать эту идею", callback_data=f'select_idea_{profile.current_idea_index}')])
+    
+    # Кнопка переключения типа идей
+    if not profile.show_creative_ideas and any(i.idea_type == IdeaType.CREATIVE for i in profile.business_ideas):
+        keyboard.append([InlineKeyboardButton("✨ Показать креативные идеи", callback_data='show_creative')])
+    elif profile.show_creative_ideas:
+        keyboard.append([InlineKeyboardButton("💡 Показать практичные идеи", callback_data='show_normal')])
+    
+    keyboard.append([InlineKeyboardButton("🔄 Сгенерировать новые", callback_data='regenerate_ideas')])
     keyboard.append([InlineKeyboardButton("🏠 В начало", callback_data='back_to_start')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -528,13 +784,24 @@ async def navigate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         profile.current_idea_index -= 1
     elif query.data == 'next_idea' and profile.current_idea_index < len(profile.business_ideas) - 1:
         profile.current_idea_index += 1
-    elif query.data == 'other_ideas':
-        # Перегенерировать идеи
-        profile.current_idea_index = 0
-        if profile.ai_enabled:
-            ai_ideas = await openai_service.generate_business_ideas(profile.answers)
-            if ai_ideas:
-                profile.business_ideas = ai_ideas
+    elif query.data == 'show_creative':
+        # Показываем только креативные идеи
+        creative_ideas = [i for i in profile.business_ideas if i.idea_type == IdeaType.CREATIVE]
+        if creative_ideas:
+            profile.business_ideas = creative_ideas
+            profile.current_idea_index = 0
+            profile.show_creative_ideas = True
+    elif query.data == 'show_normal':
+        # Показываем только нормальные идеи
+        normal_ideas = [i for i in profile.business_ideas if i.idea_type == IdeaType.NORMAL]
+        if normal_ideas:
+            profile.business_ideas = normal_ideas
+            profile.current_idea_index = 0
+            profile.show_creative_ideas = False
+    elif query.data == 'regenerate_ideas':
+        # Регенерация идей
+        await query.edit_message_text("🔄 *Генерирую новые идеи...*", parse_mode='Markdown')
+        return await generate_business_ideas_wrapper(update, context)
     
     return await show_current_idea(update, context)
 
@@ -562,117 +829,180 @@ async def select_idea(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     profile.selected_idea = profile.business_ideas[idea_index]
     
-    # Генерируем план через AI или запасной
+    # Показываем статус генерации с информацией о токенах
+    token_bar = token_usage.get_usage_bar()
+    token_info = f"\n📊 *Использование токенов:* {token_bar}"
+    
     await query.edit_message_text(
-        f"🧠 *Генерирую детальный бизнес-план для:*\n\n*{profile.selected_idea.title}*\n\n⏳ *Пожалуйста, подождите...*",
+        f"🧠 *Генерирую ПОЛНЫЙ бизнес-план для:*\n\n"
+        f"*{profile.selected_idea.title}*\n\n"
+        f"📋 *Что будет в плане:*\n"
+        f"• Детальный финансовый расчет\n"
+        f"• Сроки выхода в ноль\n"
+        f"• План на 50,000₽ и 100,000₽ в месяц\n"
+        f"• Пошаговый план на 12 месяцев\n\n"
+        f"⏳ *Это займет 45-60 секунд*{token_info}",
         parse_mode='Markdown'
     )
     
+    # Генерируем план через AI или запасной
     business_plan = None
     if profile.ai_enabled and openai_service.is_available:
-        business_plan = await openai_service.generate_business_plan(profile.answers, profile.selected_idea)
+        business_plan = await openai_service.generate_detailed_business_plan(profile.answers, profile.selected_idea)
     
     # Запасной план если AI не сработал
     if not business_plan:
-        business_plan = generate_fallback_plan(profile.answers, profile.selected_idea)
+        business_plan = generate_detailed_fallback_plan(profile.answers, profile.selected_idea)
     
     profile.business_plan = business_plan
     
     # Показываем план
     return await show_business_plan(update, context)
 
-def generate_fallback_plan(answers: Dict[int, str], idea: BusinessIdea) -> str:
-    """Запасной бизнес-план"""
+def generate_detailed_fallback_plan(answers: Dict[int, str], idea: BusinessIdea) -> str:
+    """Детальный запасной бизнес-план"""
     city = answers.get(0, "вашем городе")
     budget = answers.get(7, "50,000 рублей")
+    time_per_week = answers.get(8, "20 часов")
     
-    plan = f"""# 📈 БИЗНЕС-ПЛАН: {idea.title}
+    return f"""# 📈 ПОЛНЫЙ БИЗНЕС-ПЛАН: {idea.title}
 
-## 🎯 Краткое резюме
+## 1. 🎯 Краткое резюме бизнеса
 {idea.description}
 
-## 📍 Анализ рынка в {city}
-- Высокий спрос на услуги такого типа
-- Конкуренция средняя, есть место для новых игроков
-- Цены в среднем от 3,000 до 15,000 рублей за проект
+## 2. 📈 Анализ рынка в {city}
+- **Размер рынка:** Примерно 100 млн рублей в год в вашем регионе
+- **Конкуренция:** 5-10 основных игроков, качество услуг среднее
+- **Ниша:** Персонализированный подход и гибкие условия
+- **Тренды:** Рост спроса на 15-20% ежегодно
 
-## 🎯 Целевая аудитория
-- Малый и средний бизнес в {city}
-- Частные клиенты
-- Студенты и фрилансеры
+## 3. 🎯 Целевая аудитория
+### Основные сегменты:
+1. **Малый бизнес** (50% клиентов) - нуждаются в регулярных услугах
+2. **Частные клиенты** (30%) - разовые заказы, более высокая маржа
+3. **Корпорации** (20%) - крупные проекты, долгосрочные контракты
 
-## 📢 Маркетинг-план
-1. Создание аккаунтов в соцсетях (Telegram, VK)
-2. Реклама в местных группах и чатах
-3. Первые проекты по специальной цене для портфолио
-4. Сбор отзывов и рекомендаций
+## 4. 📱 Маркетинг-план на 6 месяцев
+### Месяц 1-2: Запуск (бюджет: 15,000₽)
+- Создание сайта и соцсетей
+- Первые 5 проектов по специальной цене
+- Сбор отзывов и кейсов
 
-## ⚙️ Операционный план
-- Рабочее место: дом/коворкинг
-- Оборудование: компьютер, телефон, базовые инструменты
-- Режим работы: гибкий график
+### Месяц 3-4: Рост (бюджет: 20,000₽)
+- Таргетированная реклама в VK/Telegram
+- Партнерства с местными бизнесами
+- Участие в профильных мероприятиях
 
-## 💰 Финансовый план
-- Стартовые вложения: {budget}
-- Ежемесячные расходы: 5,000 - 15,000 руб
-- Средний доход в месяц: 30,000 - 80,000 руб
-- Окупаемость: 2-4 месяца
+### Месяц 5-6: Стабилизация (бюджет: 25,000₽)
+- SEO-оптимизация сайта
+- Email-рассылка базы клиентов
+- Внедрение реферальной программы
 
-## 🗓️ Пошаговый план на 3 месяца
+## 5. ⚙️ Операционный план
+- **Режим работы:** {time_per_week} часов в неделю
+- **Оборудование:** Компьютер, телефон, базовый набор инструментов
+- **Помещение:** Работа из дома/коворкинг
+- **Юридическая форма:** ИП (упрощенная система налогообложения)
 
-### Месяц 1: Подготовка
-1. Создать портфолио (3-5 работ)
-2. Настроить соцсети
-3. Подготовить коммерческое предложение
+## 6. 💰 ФИНАНСОВЫЙ ПЛАН
 
-### Месяц 2: Поиск клиентов
-1. Предложить услуги 10-15 бизнесам
-2. Сделать 2-3 проекта по специальной цене
-3. Собрать первые отзывы
+### Стартовые инвестиции:
+- Оборудование: 25,000₽
+- Регистрация ИП: 5,000₽
+- Первая реклама: 15,000₽
+- Резервный фонд: 5,000₽
+- **ИТОГО СТАРТ:** {budget}
 
-### Месяц 3: Развитие
-1. Запустить таргетированную рекламу
-2. Наладить регулярный поток заказов
-3. Оптимизировать процессы работы"""
-    
-    return plan
+### Ежемесячные расходы:
+- Реклама: 10,000-20,000₽
+- Софт/инструменты: 3,000₽
+- Налоги (6% от доходов): ~4,500₽
+- Прочие расходы: 2,500₽
+- **ИТОГО В МЕСЯЦ:** ~20,000₽
+
+### План доходов:
+| Месяц | Клиентов | Средний чек | Доход | Расходы | Прибыль | Накоплено |
+|-------|----------|-------------|-------|---------|---------|-----------|
+| 1     | 3        | 5,000₽      | 15,000₽ | 35,000₽ | -20,000₽ | -20,000₽ |
+| 2     | 5        | 6,000₽      | 30,000₽ | 25,000₽ | 5,000₽   | -15,000₽ |
+| 3     | 8        | 7,000₽      | 56,000₽ | 25,000₽ | 31,000₽  | 16,000₽  |
+| 4     | 12       | 7,500₽      | 90,000₽ | 30,000₽ | 60,000₽  | 76,000₽  |
+| 5     | 15       | 8,000₽      | 120,000₽| 35,000₽ | 85,000₽  | 161,000₽ |
+| 6     | 18       | 8,500₽      | 153,000₽| 40,000₽ | 113,000₽ | 274,000₽ |
+
+### 🎯 Ключевые финансовые цели:
+- **Выход в ноль (break-even):** К концу 2-го месяца
+- **Доход 50,000₽ в месяц:** Достигается на 3-м месяце
+- **Доход 100,000₽ в месяц:** Достигается на 5-м месяце
+- **Окупаемость стартовых вложений:** 3 месяца
+
+## 7. 🚀 Пошаговый план запуска (первые 30 дней)
+
+### Неделя 1: Подготовка (дни 1-7)
+1. Зарегистрировать ИП
+2. Создать базовое оборудование
+3. Настроить банковский счет
+4. Разработать коммерческое предложение
+
+### Неделя 2: Создание активов (дни 8-14)
+1. Сделать сайт-визитку
+2. Создать аккаунты в соцсетях
+3. Подготовить портфолио (3 примера)
+4. Написать тексты для рекламы
+
+### Неделя 3: Тестовые продажи (дни 15-21)
+1. Предложить услуги 20 потенциальным клиентам
+2. Провести 5 бесплатных консультаций
+3. Заключить 3 первых договора
+4. Начать работу над первыми проектами
+
+### Неделя 4: Анализ и корректировка (дни 22-30)
+1. Собрать обратную связь от первых клиентов
+2. Оптимизировать процессы работы
+3. Скорректировать цены при необходимости
+4. Запустить первую платную рекламу
+
+## 8. ⚠️ Риски и их минимизация
+1. **Недостаток клиентов** - активно работать с рефералами
+2. **Конкуренция** - выделяться качеством обслуживания
+3. **Сезонность** - разработать круглогодичные услуги
+4. **Финансовые риски** - держать резерв на 3 месяца расходов
+
+## 9. 📈 Показатели успеха (KPI)
+- **Ежедневно:** Новые контакты (3-5), конверсия в заявки (20%)
+- **Еженедельно:** Закрытые сделки (2-3), доход (15,000-25,000₽)
+- **Ежемесячно:** Чистая прибыль (от 30,000₽), повторные продажи (30%)
+- **Критерий масштабирования:** Стабильный доход 100,000₽+ в течение 3 месяцев
+
+💪 *Бизнес имеет высокий потенциал роста при системном подходе!*"""
 
 async def show_business_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать бизнес-план"""
+    """Показать детальный бизнес-план"""
     query = update.callback_query
     user_id = query.from_user.id
     profile = user_sessions[user_id]
     
-    # Разбиваем план на части (ограничение Telegram - 4096 символов)
-    plan_text = profile.business_plan
-    max_length = 4000
+    # Добавляем информацию о токенах в начало плана
+    token_bar = token_usage.get_usage_bar()
+    token_info = f"\n📊 *Использование токенов:* {token_bar}"
+    token_info += f"\n💰 *Примерная стоимость запроса:* ${token_usage.estimated_cost:.4f}"
     
-    if len(plan_text) <= max_length:
-        parts = [plan_text]
-    else:
-        parts = []
-        while len(plan_text) > max_length:
-            # Ищем последний перенос строки
-            split_pos = plan_text.rfind('\n', 0, max_length)
-            if split_pos == -1:
-                split_pos = max_length
-            
-            parts.append(plan_text[:split_pos])
-            plan_text = plan_text[split_pos:].lstrip()
-        
-        if plan_text:
-            parts.append(plan_text)
-    
-    # Отправляем первую часть с кнопками
-    text = f"""🎯 *ДЕТАЛЬНЫЙ БИЗНЕС-ПЛАН*
+    enhanced_plan = f"""# 🚀 ДЕТАЛЬНЫЙ БИЗНЕС-ПЛАН{token_info}
 
 *{profile.selected_idea.title}*
 
-{parts[0]}"""
+{profile.business_plan}"""
+    
+    # Разбиваем план на части
+    plan_parts = split_text(enhanced_plan, max_length=4000)
+    
+    # Отправляем первую часть с кнопками
+    text = plan_parts[0]
     
     keyboard = [
-        [InlineKeyboardButton("📄 Скачать PDF (скоро)", callback_data='pdf_soon')],
+        [InlineKeyboardButton("💾 Сохранить план", callback_data='save_plan')],
         [InlineKeyboardButton("🔄 Выбрать другую идею", callback_data='back_to_ideas')],
+        [InlineKeyboardButton("📊 Статистика токенов", callback_data='token_stats')],
         [InlineKeyboardButton("🏠 Начать заново", callback_data='back_to_start')]
     ]
     
@@ -681,7 +1011,7 @@ async def show_business_plan(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
     
     # Отправляем остальные части
-    for part in parts[1:]:
+    for part in plan_parts[1:]:
         try:
             await context.bot.send_message(
                 chat_id=user_id,
@@ -693,17 +1023,59 @@ async def show_business_plan(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     return BUSINESS_PLAN_STATE
 
-async def pdf_soon(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Заглушка для PDF"""
+async def token_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать статистику использования токенов"""
     query = update.callback_query
     await query.answer()
     
-    await query.edit_message_text(
-        "📄 *PDF-функция в разработке*\n\nСкоро вы сможете скачать красивый PDF с вашим бизнес-планом!\n\nА пока можете скопировать текст плана из сообщений выше.\n\nДля нового поиска нажмите /start",
-        parse_mode='Markdown'
-    )
+    usage_percentage = token_usage.get_usage_percentage()
+    remaining_percentage = token_usage.get_remaining_percentage()
+    usage_bar = token_usage.get_usage_bar()
     
-    return ConversationHandler.END
+    stats_text = f"""📊 *СТАТИСТИКА ИСПОЛЬЗОВАНИЯ OPENAI*
+
+{usage_bar}
+
+📈 *Детальная статистика:*
+• Всего токенов: {token_usage.total_tokens:,}
+• Prompt токены: {token_usage.prompt_tokens:,}
+• Completion токены: {token_usage.completion_tokens:,}
+• Использовано: {usage_percentage:.1f}%
+• Осталось: {remaining_percentage:.1f}%
+• Примерная стоимость: ${token_usage.estimated_cost:.4f}
+
+💰 *Лимиты (примерные):*
+• Бесплатный аккаунт: ~100K токенов/месяц
+• Платный аккаунт: от 1M токенов/месяц
+
+⚠️ *Рекомендации:*
+{get_token_usage_recommendation(usage_percentage)}"""
+    
+    keyboard = [
+        [InlineKeyboardButton("🔙 Назад к плану", callback_data='back_to_plan')],
+        [InlineKeyboardButton("🏠 В начало", callback_data='back_to_start')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BUSINESS_PLAN_STATE
+
+def get_token_usage_recommendation(usage_percentage: float) -> str:
+    """Получить рекомендации по использованию токенов"""
+    if usage_percentage >= 90:
+        return "🔴 Критически высокое использование! Рассмотрите переход на платный тариф."
+    elif usage_percentage >= 70:
+        return "🟡 Высокое использование. Оптимизируйте промты для экономии токенов."
+    elif usage_percentage >= 50:
+        return "🟢 Среднее использование. Можно продолжать работу."
+    else:
+        return "🟢 Низкое использование. Можно генерировать больше контента."
+
+async def back_to_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вернуться к бизнес-плану"""
+    return await show_business_plan(update, context)
 
 async def back_to_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Вернуться к идеям"""
@@ -720,6 +1092,41 @@ async def back_to_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     profile.current_idea_index = 0
     return await show_current_idea(update, context)
 
+async def save_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохранение плана"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = user_sessions[user_id]
+    
+    # Добавляем информацию о токенах
+    token_bar = token_usage.get_usage_bar()
+    footer = f"\n\n---\n📊 *Использование токенов при генерации:* {token_bar}"
+    footer += f"\n💰 *Примерная стоимость:* ${token_usage.estimated_cost:.4f}"
+    footer += f"\n⏰ *Сгенерировано:* {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    
+    full_plan = profile.business_plan + footer
+    
+    await query.edit_message_text(
+        "💾 *План сохранен в истории чата!*\n\n"
+        "📋 *Рекомендуемые следующие шаги:*\n"
+        "1. Выделите 1-2 самых простых действия из плана\n"
+        "2. Начните с них в течение 48 часов\n"
+        "3. Делитесь прогрессом с друзьями для accountability\n"
+        "4. Регулярно возвращайтесь к плану для корректировок\n\n"
+        "🎯 *Ключевые даты для контроля:*\n"
+        "• Через 1 неделя: первые клиенты\n"
+        "• Через 1 месяц: выход в ноль\n"
+        "• Через 3 месяца: доход 50,000₽\n"
+        "• Через 6 месяцев: доход 100,000₽\n\n"
+        "🚀 *У вас всё получится!*\n\n"
+        "Для нового поиска нажмите /start",
+        parse_mode='Markdown'
+    )
+    
+    return ConversationHandler.END
+
 async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Вернуться в начало"""
     query = update.callback_query
@@ -729,11 +1136,15 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in user_sessions:
         del user_sessions[user_id]
     
-    keyboard = [[InlineKeyboardButton("📋 Начать анкету", callback_data='start_questionnaire')]]
+    # Показываем финальную статистику токенов
+    token_bar = token_usage.get_usage_bar()
+    token_info = f"\n📊 *Итоговое использование токенов:* {token_bar}"
+    
+    keyboard = [[InlineKeyboardButton("📋 Начать новую анкету", callback_data='start_questionnaire')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "👋 *Снова здравствуйте!*\n\nНажмите кнопку чтобы начать новую анкету:",
+        f"👋 *Спасибо за использование Бизнес-Навигатора!*{token_info}\n\nНажмите кнопку чтобы начать новую анкету:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -752,13 +1163,41 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
+# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+def split_text(text: str, max_length: int = 4000) -> List[str]:
+    """Разделение текста на части для Telegram"""
+    if len(text) <= max_length:
+        return [text]
+    
+    parts = []
+    while len(text) > max_length:
+        # Ищем последний перенос строки
+        split_pos = text.rfind('\n', 0, max_length)
+        if split_pos == -1:
+            split_pos = max_length
+        
+        parts.append(text[:split_pos])
+        text = text[split_pos:].lstrip()
+    
+    if text:
+        parts.append(text)
+    
+    return parts
+
 # ==================== HEALTH CHECK ====================
 async def health_check(request):
     status = {
         "status": "OK",
-        "version": "3.3",
+        "version": "4.0",
         "openai_available": openai_service.is_available,
-        "active_sessions": len(user_sessions)
+        "active_sessions": len(user_sessions),
+        "token_usage": {
+            "total_tokens": token_usage.total_tokens,
+            "prompt_tokens": token_usage.prompt_tokens,
+            "completion_tokens": token_usage.completion_tokens,
+            "estimated_cost": token_usage.estimated_cost,
+            "usage_percentage": token_usage.get_usage_percentage()
+        }
     }
     return web.Response(
         text=json.dumps(status, ensure_ascii=False, indent=2),
@@ -790,7 +1229,7 @@ async def main():
         logger.error("❌ TELEGRAM_TOKEN не найден!")
         return
     
-    logger.info(f"🚀 Запуск Бизнес-бота v3.3 (OpenAI: {openai_service.is_available})")
+    logger.info(f"🚀 Запуск Бизнес-бота v4.0 (OpenAI: {openai_service.is_available})")
     
     # Создаем приложение
     application = Application.builder().token(token).build()
@@ -809,12 +1248,14 @@ async def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_questionnaire_answer)
             ],
             BUSINESS_IDEAS_STATE: [
-                CallbackQueryHandler(navigate_ideas, pattern='^(prev_idea|next_idea|other_ideas)$'),
+                CallbackQueryHandler(navigate_ideas, pattern='^(prev_idea|next_idea|show_creative|show_normal|regenerate_ideas)$'),
                 CallbackQueryHandler(select_idea, pattern='^select_idea_'),
                 CallbackQueryHandler(back_to_start, pattern='^back_to_start$')
             ],
             BUSINESS_PLAN_STATE: [
-                CallbackQueryHandler(pdf_soon, pattern='^pdf_soon$'),
+                CallbackQueryHandler(save_plan, pattern='^save_plan$'),
+                CallbackQueryHandler(token_stats, pattern='^token_stats$'),
+                CallbackQueryHandler(back_to_plan, pattern='^back_to_plan$'),
                 CallbackQueryHandler(back_to_ideas, pattern='^back_to_ideas$'),
                 CallbackQueryHandler(back_to_start, pattern='^back_to_start$')
             ]
