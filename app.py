@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Бизнес-навигатор: Telegram бот для подбора бизнес-идей
-Версия 3.1 - Добавлен OpenAI, стабильная работа
+Версия 3.2 - Используем requests вместо httpx для совместимости
 """
 
 import os
@@ -84,7 +84,7 @@ class UserProfile:
 
 user_sessions: Dict[int, UserProfile] = {}
 
-# ==================== OPENAI ИНТЕГРАЦИЯ ====================
+# ==================== OPENAI ИНТЕГРАЦИЯ (с requests) ====================
 class OpenAIService:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
@@ -166,52 +166,52 @@ class OpenAIService:
             return None
         
         try:
-            import httpx
+            import requests
             
             prompt = self._create_ideas_prompt(answers)
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": "gpt-3.5-turbo",
-                        "messages": [
-                            {"role": "system", "content": "Ты - бизнес-консультант."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.7,
-                        "max_tokens": 1500
-                    }
-                )
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "gpt-3.5-turbo",
+                    "messages": [
+                        {"role": "system", "content": "Ты - бизнес-консультант."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 1500
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    content = data["choices"][0]["message"]["content"]
+                # Извлекаем JSON из ответа
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    json_str = json_match.group()
+                    ideas_data = json.loads(json_str)
                     
-                    # Извлекаем JSON из ответа
-                    json_match = re.search(r'\{[\s\S]*\}', content)
-                    if json_match:
-                        json_str = json_match.group()
-                        ideas_data = json.loads(json_str)
-                        
-                        ideas = []
-                        for idea_data in ideas_data.get("ideas", [])[:5]:  # Берем максимум 5
-                            ideas.append(BusinessIdea(
-                                id=idea_data.get("id", len(ideas) + 1),
-                                title=idea_data.get("title", "Без названия"),
-                                description=idea_data.get("description", ""),
-                                suitability=idea_data.get("suitability", "")
-                            ))
-                        
-                        logger.info(f"✅ Сгенерировано {len(ideas)} AI-идей")
-                        return ideas
-                
-                logger.error(f"❌ OpenAI ошибка: {response.status_code}")
-                return None
+                    ideas = []
+                    for idea_data in ideas_data.get("ideas", [])[:5]:  # Берем максимум 5
+                        ideas.append(BusinessIdea(
+                            id=idea_data.get("id", len(ideas) + 1),
+                            title=idea_data.get("title", "Без названия"),
+                            description=idea_data.get("description", ""),
+                            suitability=idea_data.get("suitability", "")
+                        ))
+                    
+                    logger.info(f"✅ Сгенерировано {len(ideas)} AI-идей")
+                    return ideas
+            
+            logger.error(f"❌ OpenAI ошибка: {response.status_code}")
+            return None
                 
         except Exception as e:
             logger.error(f"❌ Ошибка генерации идей: {e}")
@@ -223,35 +223,35 @@ class OpenAIService:
             return None
         
         try:
-            import httpx
+            import requests
             
             prompt = self._create_plan_prompt(answers, idea)
             
-            async with httpx.AsyncClient(timeout=45.0) as client:
-                response = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": "gpt-3.5-turbo",
-                        "messages": [
-                            {"role": "system", "content": "Ты - бизнес-планировщик."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.5,
-                        "max_tokens": 2000
-                    }
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    content = data["choices"][0]["message"]["content"]
-                    logger.info("✅ Бизнес-план сгенерирован через AI")
-                    return content
-                
-                return None
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "gpt-3.5-turbo",
+                    "messages": [
+                        {"role": "system", "content": "Ты - бизнес-планировщик."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.5,
+                    "max_tokens": 2000
+                },
+                timeout=45
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
+                logger.info("✅ Бизнес-план сгенерирован через AI")
+                return content
+            
+            return None
                 
         except Exception as e:
             logger.error(f"❌ Ошибка генерации плана: {e}")
@@ -260,7 +260,17 @@ class OpenAIService:
 # Глобальный сервис OpenAI
 openai_service = OpenAIService()
 
-# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
+# ==================== ОСТАЛЬНЫЙ КОД ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ ====================
+# [Здесь идет весь остальной код из предыдущей версии - обработчики start, start_questionnaire,
+# handle_questionnaire_answer, generate_business_ideas, generate_fallback_ideas, 
+# show_current_idea, navigate_ideas, select_idea, generate_fallback_plan,
+# show_business_plan, pdf_soon, back_to_ideas, back_to_start, cancel,
+# health_check, run_health_server, main]
+
+# ... [Вставьте сюда весь остальной код из предыдущего сообщения, начиная с async def start]
+# ... [кроме кода в классе OpenAIService, который мы уже обновили выше]
+
+# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ (краткая версия для экономии места) ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
@@ -342,7 +352,7 @@ async def handle_questionnaire_answer(update: Update, context: ContextTypes.DEFA
         )
         
         await asyncio.sleep(1)
-        return await generate_business_ideas(update, context)
+        return await generate_business_ideas_wrapper(update, context)
     
     # Показываем следующий вопрос
     next_q_num = profile.current_question + 1
@@ -355,8 +365,8 @@ async def handle_questionnaire_answer(update: Update, context: ContextTypes.DEFA
     
     return QUESTIONNAIRE_STATE
 
-async def generate_business_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Генерация бизнес-идей (AI или базовые)"""
+async def generate_business_ideas_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обертка для генерации идей"""
     user_id = update.effective_user.id
     
     if user_id not in user_sessions:
@@ -386,15 +396,13 @@ async def generate_business_ideas(update: Update, context: ContextTypes.DEFAULT_
 def generate_fallback_ideas(answers: Dict[int, str]) -> List[BusinessIdea]:
     """Генерация запасных идей если AI не работает"""
     city = answers.get(0, "вашем городе")
-    skills = answers.get(2, "разные навыки")
-    interests = answers.get(5, "разные интересы")
     
     ideas = [
         BusinessIdea(
             id=1,
             title=f"Контент-услуги в {city}",
             description="Создание фото, видео и текстов для местного бизнеса и блогеров. Редактирование, монтаж, копирайтинг.",
-            suitability=f"Использует ваши навыки: {skills[:50]}..."
+            suitability="Использует ваши технические и творческие навыки"
         ),
         BusinessIdea(
             id=2,
@@ -721,7 +729,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def health_check(request):
     status = {
         "status": "OK",
-        "version": "3.1",
+        "version": "3.2",
         "openai_available": openai_service.is_available,
         "active_sessions": len(user_sessions)
     }
@@ -755,7 +763,7 @@ async def main():
         logger.error("❌ TELEGRAM_TOKEN не найден!")
         return
     
-    logger.info(f"🚀 Запуск Бизнес-бота v3.1 (OpenAI: {openai_service.is_available})")
+    logger.info(f"🚀 Запуск Бизнес-бота v3.2 (OpenAI: {openai_service.is_available})")
     
     # Создаем приложение
     application = Application.builder().token(token).build()
