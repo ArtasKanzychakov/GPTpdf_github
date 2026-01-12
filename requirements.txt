@@ -1,4 +1,4 @@
 python-telegram-bot==20.3
-httpx==0.27.0
+requests==2.31.0  # Вместо httpx - проще и совместимей
 aiohttp==3.10.0
 python-dotenv==1.0.0
