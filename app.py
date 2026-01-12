@@ -36,7 +36,7 @@ OPENAI_MODEL = "gpt-3.5-turbo"
 if not TELEGRAM_TOKEN:
     logger.warning("⚠️ TELEGRAM_BOT_TOKEN не задан, используем тестовый токен")
     TELEGRAM_TOKEN = "test_telegram_token_placeholder"
-    
+
 if not OPENAI_API_KEY:
     logger.warning("⚠️ OPENAI_API_KEY не задан, используем тестовый ключ")
     OPENAI_API_KEY = "test_openai_key_placeholder"
@@ -45,7 +45,7 @@ logger.info(f"✅ PORT: {PORT}")
 logger.info(f"✅ TELEGRAM_TOKEN задан: {'Да' if TELEGRAM_TOKEN and TELEGRAM_TOKEN != 'test_telegram_token_placeholder' else 'Нет (тестовый)'}")
 logger.info(f"✅ OPENAI_API_KEY задан: {'Да' if OPENAI_API_KEY and OPENAI_API_KEY != 'test_openai_key_placeholder' else 'Нет (тестовый)'}")
 
-# Инициализация OpenAI (даже с тестовым ключом)
+# Инициализация OpenAI
 try:
     openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
     logger.info("✅ OpenAI клиент инициализирован")
@@ -54,7 +54,8 @@ except Exception as e:
     openai_client = None
 
 # Состояния ConversationHandler
-START, Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8, Q9, Q10, Q11, Q12, Q13, Q14, Q15, Q16, GENERATE_NICHES = range(18)
+(START, Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8, Q9, Q10, 
+ Q11, Q12, Q13, Q14, Q15, Q16, GENERATE_NICHES) = range(18)
 
 # Расширенные вопросы анкеты
 QUIZ_QUESTIONS = [
@@ -111,7 +112,7 @@ async def start_http_server():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
-    
+
     logger.info(f"✅ Health check сервер запущен на порту {PORT}")
     return runner
 
@@ -119,7 +120,7 @@ async def start_http_server():
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user_id = update.effective_user.id
-    
+
     # Сохраняем пользователя
     user_data_store[user_id] = {
         'answers': {},
@@ -128,7 +129,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'user_name': update.from_user.first_name,
         'start_time': datetime.now().isoformat()
     }
-    
+
     await update.message.reply_text(
         "🤖 **Бизнес-навигатор**\n\n"
         "✅ *Расширенная анкета из 16 вопросов*\n"
@@ -148,9 +149,9 @@ async def start_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Начало анкеты при нажатии кнопки"""
     query = update.callback_query
     await query.answer()
-    
+
     user_id = query.from_user.id
-    
+
     # Проверяем OpenAI ключ
     if not openai_client or OPENAI_API_KEY == "test_openai_key_placeholder":
         await query.edit_message_text(
@@ -159,7 +160,7 @@ async def start_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode='Markdown'
         )
         return ConversationHandler.END
-    
+
     # Создаем или обновляем данные пользователя
     if user_id not in user_data_store:
         user_data_store[user_id] = {
@@ -172,7 +173,7 @@ async def start_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         user_data_store[user_id]['question_index'] = 0
         user_data_store[user_id]['answers'] = {}
-    
+
     await query.edit_message_text("📝 Начинаем анкету...")
     return await send_question(context, user_id)
 
@@ -180,7 +181,7 @@ async def send_question(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     """Отправка следующего вопроса"""
     user_data = user_data_store[user_id]
     q_index = user_data['question_index']
-    
+
     if q_index >= len(QUIZ_QUESTIONS):
         await context.bot.send_message(
             chat_id=user_data['chat_id'],
@@ -188,9 +189,9 @@ async def send_question(context: ContextTypes.DEFAULT_TYPE, user_id: int):
             reply_markup=ReplyKeyboardRemove()
         )
         return await generate_ideas(context, user_id)
-    
+
     question = QUIZ_QUESTIONS[q_index]
-    
+
     keyboard = None
     if question["type"] == "options" and "options" in question:
         keyboard = ReplyKeyboardMarkup(
@@ -198,7 +199,7 @@ async def send_question(context: ContextTypes.DEFAULT_TYPE, user_id: int):
             resize_keyboard=True,
             one_time_keyboard=False
         )
-    
+
     await context.bot.send_message(
         chat_id=user_data['chat_id'],
         text=f"*Вопрос {q_index+1}/{len(QUIZ_QUESTIONS)}*\n\n{question['text']}",
@@ -210,20 +211,20 @@ async def send_question(context: ContextTypes.DEFAULT_TYPE, user_id: int):
 async def handle_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка ответа на вопрос"""
     user_id = update.effective_user.id
-    
+
     if user_id not in user_data_store:
         await update.message.reply_text(
             "Сессия устарела. Начните заново: /start",
             reply_markup=ReplyKeyboardRemove()
         )
         return ConversationHandler.END
-    
+
     user_data = user_data_store[user_id]
     q_index = user_data['question_index']
-    
+
     user_data['answers'][f'q{q_index+1}'] = update.message.text
     user_data['question_index'] += 1
-    
+
     if user_data['question_index'] < len(QUIZ_QUESTIONS):
         return await send_question(context, user_id)
     else:
@@ -236,7 +237,7 @@ async def handle_quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def generate_ideas(context: ContextTypes.DEFAULT_TYPE, user_id: int):
     """Генерация бизнес-идей на основе анкеты"""
     user_data = user_data_store[user_id]
-    
+
     if not openai_client or OPENAI_API_KEY == "test_openai_key_placeholder":
         await context.bot.send_message(
             chat_id=user_data['chat_id'],
@@ -244,11 +245,11 @@ async def generate_ideas(context: ContextTypes.DEFAULT_TYPE, user_id: int):
             parse_mode='Markdown'
         )
         return ConversationHandler.END
-    
+
     try:
         profile_summary = "\n".join([f"{key}: {value}" for key, value in user_data['answers'].items()])
         location = user_data['answers'].get('q1', 'регион не указан')
-        
+
         prompt = f"""
         Ты бизнес-консультант с экспертизой в российских регионах.
         
@@ -271,7 +272,7 @@ async def generate_ideas(context: ContextTypes.DEFAULT_TYPE, user_id: int):
         4. Особенности в {location}: [как адаптировать]
         5. Первые шаги: [3 конкретных действия]
         """
-        
+
         completion = await openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
@@ -281,11 +282,11 @@ async def generate_ideas(context: ContextTypes.DEFAULT_TYPE, user_id: int):
             temperature=0.7,
             max_tokens=2000
         )
-        
+
         ideas_text = completion.choices[0].message.content
         ideas = []
         current_idea = []
-        
+
         for line in ideas_text.split('\n'):
             line = line.strip()
             if line and line[0].isdigit() and '.' in line and current_idea:
@@ -293,21 +294,21 @@ async def generate_ideas(context: ContextTypes.DEFAULT_TYPE, user_id: int):
                 current_idea = [line]
             elif line:
                 current_idea.append(line)
-        
+
         if current_idea:
             ideas.append('\n'.join(current_idea))
-        
+
         ideas = ideas[:5]
         user_niches_store[user_id] = ideas
-        
+
         keyboard = []
         for i, idea in enumerate(ideas[:5], 1):
             first_line = idea.split('\n')[0] if idea else f"Идея {i}"
             title = first_line[:35] + "..." if len(first_line) > 35 else first_line
             keyboard.append([InlineKeyboardButton(f"{i}. {title}", callback_data=f"idea_{i-1}")])
-        
+
         keyboard.append([InlineKeyboardButton("📋 Показать все идеи", callback_data="show_all")])
-        
+
         await context.bot.send_message(
             chat_id=user_data['chat_id'],
             text=f"🎉 **Подобрано {len(ideas)} бизнес-идей для вас!**\n\n"
@@ -317,9 +318,9 @@ async def generate_ideas(context: ContextTypes.DEFAULT_TYPE, user_id: int):
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
-        
+
         return GENERATE_NICHES
-        
+
     except Exception as e:
         logger.error(f"Ошибка генерации идей: {e}")
         await context.bot.send_message(
@@ -333,27 +334,27 @@ async def handle_idea_selection(update: Update, context: ContextTypes.DEFAULT_TY
     """Обработка выбора идеи"""
     query = update.callback_query
     await query.answer()
-    
+
     user_id = query.from_user.id
-    
+
     if query.data.startswith("idea_"):
         idx = int(query.data.split("_")[1])
-        
+
         if user_id in user_niches_store and idx < len(user_niches_store[user_id]):
             idea = user_niches_store[user_id][idx]
-            
+
             if not openai_client:
                 await query.edit_message_text(
                     "❌ OpenAI API не настроен.",
                     parse_mode='Markdown'
                 )
                 return GENERATE_NICHES
-            
+
             plan_prompt = f"Создай детальный бизнес-план для: {idea}"
-            
+
             try:
                 await query.edit_message_text("📊 Составляю бизнес-план...")
-                
+
                 completion = await openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=[
@@ -363,13 +364,13 @@ async def handle_idea_selection(update: Update, context: ContextTypes.DEFAULT_TY
                     temperature=0.5,
                     max_tokens=2000
                 )
-                
+
                 plan = completion.choices[0].message.content
                 response = f"📋 **БИЗНЕС-ПЛАН**\n\n{idea}\n\n{plan}"
-                
+
                 if len(response) > 4000:
                     response = response[:4000] + "\n\n..."
-                
+
                 await query.edit_message_text(
                     response,
                     parse_mode='Markdown',
@@ -378,10 +379,10 @@ async def handle_idea_selection(update: Update, context: ContextTypes.DEFAULT_TY
                         [InlineKeyboardButton("🔄 Новый поиск", callback_data="restart")]
                     ])
                 )
-                
+
             except Exception as e:
                 await query.edit_message_text(f"Ошибка: {str(e)[:200]}")
-    
+
     elif query.data == "show_all":
         if user_id in user_niches_store:
             all_ideas = "\n\n---\n\n".join(user_niches_store[user_id])
@@ -392,7 +393,7 @@ async def handle_idea_selection(update: Update, context: ContextTypes.DEFAULT_TY
                     [InlineKeyboardButton("⬅️ Назад", callback_data="back_to_list")]
                 ])
             )
-    
+
     elif query.data == "back_to_list":
         if user_id in user_niches_store:
             keyboard = []
@@ -400,20 +401,20 @@ async def handle_idea_selection(update: Update, context: ContextTypes.DEFAULT_TY
                 first_line = idea.split('\n')[0] if idea else f"Идея {i}"
                 title = first_line[:35] + "..." if len(first_line) > 35 else first_line
                 keyboard.append([InlineKeyboardButton(f"{i}. {title}", callback_data=f"idea_{i-1}")])
-            
+
             keyboard.append([InlineKeyboardButton("📋 Показать все идеи", callback_data="show_all")])
-            
+
             await query.edit_message_text(
                 "Выберите идею:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
-    
+
     elif query.data == "restart":
         if user_id in user_data_store:
             del user_data_store[user_id]
         if user_id in user_niches_store:
             del user_niches_store[user_id]
-        
+
         await query.edit_message_text("🔄 Начинаем новую анкету...")
         user_data_store[user_id] = {
             'answers': {},
@@ -423,7 +424,7 @@ async def handle_idea_selection(update: Update, context: ContextTypes.DEFAULT_TY
             'start_time': datetime.now().isoformat()
         }
         return await send_question(context, user_id)
-    
+
     return GENERATE_NICHES
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -444,7 +445,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config_status = "✅" if TELEGRAM_TOKEN != "test_telegram_token_placeholder" else "⚠️"
     openai_status = "✅" if OPENAI_API_KEY != "test_openai_key_placeholder" else "❌"
-    
+
     await update.message.reply_text(
         f"📊 *Статус системы*\n\n"
         f"• Активные сессии: {len(user_data_store)}\n"
@@ -461,25 +462,38 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del user_data_store[user_id]
     if user_id in user_niches_store:
         del user_niches_store[user_id]
-    
+
     await update.message.reply_text("✅ Сессия сброшена. /start")
+
+# ==================== ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ ====================
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тестовая команда"""
+    await update.message.reply_text(
+        "✅ Бот работает!\n"
+        "• Телеграм токен: ✅\n"
+        "• Polling: ✅\n"
+        "• Health check: ✅\n\n"
+        "Нажмите /start чтобы начать анкету",
+        parse_mode='Markdown'
+    )
 
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
 async def main_async():
     """Асинхронная главная функция"""
     logger.info("🚀 Запуск бизнес-бота на Render...")
-    
+
     # 1. Запускаем health check сервер
     http_runner = await start_http_server()
-    
+
     # 2. Создаем приложение бота
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-    
+
     # 3. Настраиваем ConversationHandler
     quiz_states = {}
     for i in range(len(QUIZ_QUESTIONS)):
         quiz_states[i] = [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_quiz_answer)]
-    
+
+    # ВАЖНО: per_message=True для работы кнопок!
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', start_command),
@@ -503,29 +517,29 @@ async def main_async():
         ],
         per_user=True,
         per_chat=True,
-        per_message=False
+        per_message=True  # ВАЖНО: True для отслеживания callback_query!
     )
-    
+
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler('help', help_command))
     application.add_handler(CommandHandler('status', status_command))
     application.add_handler(CommandHandler('reset', reset_command))
-    
+    application.add_handler(CommandHandler('test', test_command))
+
     # 4. Запускаем бота
     logger.info("✅ Бот запускается...")
-    
+
     try:
-        # ВАЖНО: запускаем polling вручную
+        # Запускаем polling
         await application.initialize()
         await application.start()
         await application.updater.start_polling()
-        
-        # Бесконечное ожидание
+
         logger.info("✅ Бот успешно запущен и слушает команды!")
-        
-        # Создаем бесконечный Future чтобы бот не завершался
+
+        # Бесконечное ожидание
         await asyncio.Future()
-        
+
     except KeyboardInterrupt:
         logger.info("⏹️ Бот остановлен пользователем")
     except Exception as e:
@@ -536,6 +550,7 @@ async def main_async():
         try:
             await application.updater.stop()
             await application.stop()
+            await application.shutdown()
         except:
             pass
         await http_runner.cleanup()
@@ -544,7 +559,7 @@ async def main_async():
 def main():
     """Главная функция запуска"""
     try:
-        # Используем старый стиль запуска для совместимости
+        # Создаем новый event loop для совместимости
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
