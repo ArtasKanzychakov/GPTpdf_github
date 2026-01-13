@@ -1,7 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Enum классы
 """
 from enum import Enum, auto
+from dataclasses import dataclass
 
 class BotState(Enum):
     """Состояния бота"""
@@ -33,3 +36,18 @@ class NicheCategory(Enum):
     LONG_TERM = "🌱 ДОЛГОСРОЧНЫЙ"
     RISKY = "💎 РИСКОВАННЫЙ"
     HIDDEN = "🎯 СКРЫТАЯ НИША"
+
+# Дополнительный dataclass для деталей ниши (если нужно)
+@dataclass
+class NicheDetails:
+    """Детальная информация о нише"""
+    id: str
+    name: str
+    category: NicheCategory
+    description: str = ""
+    emoji: str = "📊"
+    risk_level: int = 3  # 1-5
+    time_to_profit: str = ""  # "1-3 месяца", "6-12 месяцев"
+    
+    def __str__(self):
+        return f"{self.emoji} {self.name} ({self.category.value})"
