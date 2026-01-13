@@ -230,3 +230,15 @@ class BotStatistics:
             f"• Сообщений: {self.total_messages}\n"
             f"• Работает: {self.get_uptime()}"
         )
+# models/session.py - добавить в конец файла
+
+class NicheDetails(BaseModel):
+    """Детали выбранной ниши"""
+    title: str
+    description: str
+    steps: List[str]
+    investment: str
+    roi: str
+    risks: str
+    format: str
+    why_suitable: str
