@@ -425,7 +425,7 @@ class OpenAIService:
             }
             
             data = {
-                "model": "gpt-4-turbo-preview",
+                "model": "gpt-3.5-turbo",  # Используем gpt-3.5-turbo для экономии
                 "messages": [
                     {"role": "system", "content": "Ты - опытный бизнес-консультант, психолог и аналитик."},
                     {"role": "user", "content": prompt}
@@ -805,7 +805,8 @@ def format_niche_for_display(niche: Dict, index: int, total: int) -> str:
 2. {niche.get('steps', [''])[1] if len(niche.get('steps', [])) > 1 else 'Создать MVP'}
 3. {niche.get('steps', [''])[2] if len(niche.get('steps', [])) > 2 else 'Найти первых клиентов'}"""
 
-# ==================== ОБРАБОТЧИКИ КОМАНД ====================
+# ==================== ОБРАБОТЧИКИ КОМАНД И ОПРОСНИКА ====================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
@@ -860,130 +861,812 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return BotState.DEMOGRAPHY
 
-# ==================== ДОПОЛНЕНИЕ НЕДОСТАЮЩИХ ЧАСТЕЙ ====================
+async def start_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начать анкету"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    if user_id not in chat_memory.user_profiles:
+        await query.edit_message_text("❌ Сессия не найдена. Нажмите /start")
+        return ConversationHandler.END
+    
+    profile = chat_memory.user_profiles[user_id]
+    profile.current_question = 1
+    profile.questions_answered = 0
+    
+    # Вопрос 1: Возраст
+    keyboard = [
+        [InlineKeyboardButton("18-25 лет", callback_data='age_18-25')],
+        [InlineKeyboardButton("26-35 лет", callback_data='age_26-35')],
+        [InlineKeyboardButton("36-45 лет", callback_data='age_36-45')],
+        [InlineKeyboardButton("46+ лет", callback_data='age_46+')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"{get_random_praise()}\n\n"
+        "🔢 *Вопрос 1/18: ВАШ ВОЗРАСТ*\n\n"
+        "Выберите вашу возрастную группу:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.DEMOGRAPHY
 
-async def handle_learning_distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка распределения баллов обучения (вопрос 12)"""
+async def handle_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора возраста"""
     query = update.callback_query
     await query.answer()
     
     user_id = query.from_user.id
     profile = chat_memory.user_profiles[user_id]
     
-    if query.data == 'learning_done':
-        # Проверяем, что распределено 10 баллов
-        total_points = (profile.learning_practice + profile.learning_books + 
-                       profile.learning_courses + profile.learning_group + 
-                       profile.learning_observation)
-        
-        if total_points == 10:
+    # Извлекаем возраст из callback_data
+    age_map = {
+        'age_18-25': '18-25 лет',
+        'age_26-35': '26-35 лет',
+        'age_36-45': '36-45 лет',
+        'age_46+': '46+ лет'
+    }
+    
+    profile.age_group = age_map.get(query.data, 'Не указано')
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Вопрос 2: Образование
+    keyboard = [
+        [InlineKeyboardButton("Среднее", callback_data='edu_school')],
+        [InlineKeyboardButton("Среднее специальное", callback_data='edu_college')],
+        [InlineKeyboardButton("Неоконченное высшее", callback_data='edu_incomplete')],
+        [InlineKeyboardButton("Высшее (бакалавр)", callback_data='edu_bachelor')],
+        [InlineKeyboardButton("Высшее (магистр)", callback_data='edu_master')],
+        [InlineKeyboardButton("Два и более высших", callback_data='edu_multiple')],
+        [InlineKeyboardButton("MBA/аспирантура", callback_data='edu_mba')],
+        [InlineKeyboardButton("Самообразование", callback_data='edu_self')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Отличный выбор!\n\n"
+        f"🎓 *Вопрос 2/18: ВАШЕ ОБРАЗОВАНИЕ*\n\n"
+        "Выберите ваш образовательный уровень:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.DEMOGRAPHY
+
+async def handle_education(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора образования"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    edu_map = {
+        'edu_school': 'Среднее',
+        'edu_college': 'Среднее специальное',
+        'edu_incomplete': 'Неоконченное высшее',
+        'edu_bachelor': 'Высшее (бакалавр)',
+        'edu_master': 'Высшее (магистр/специалист)',
+        'edu_multiple': 'Два и более высших',
+        'edu_mba': 'MBA/аспирантура',
+        'edu_self': 'Самообразование (курсы, самоучка)'
+    }
+    
+    profile.education = edu_map.get(query.data, 'Не указано')
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Вопрос 3: Локация
+    keyboard = [
+        [InlineKeyboardButton("Москва", callback_data='loc_moscow')],
+        [InlineKeyboardButton("Санкт-Петербург", callback_data='loc_spb')],
+        [InlineKeyboardButton("Город-миллионник", callback_data='loc_million')],
+        [InlineKeyboardButton("Областной центр", callback_data='loc_region')],
+        [InlineKeyboardButton("Малый город", callback_data='loc_small')],
+        [InlineKeyboardButton("Село/деревня", callback_data='loc_village')],
+        [InlineKeyboardButton("Другое (напишу)", callback_data='loc_custom')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Образование - важный фактор!\n\n"
+        f"🏙️ *Вопрос 3/18: ВАША ЛОКАЦИЯ*\n\n"
+        "Выберите тип вашего населенного пункта:\n"
+        "_(это поможет предложить реалистичные ниши)_"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.DEMOGRAPHY
+
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора локации"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    loc_map = {
+        'loc_moscow': 'Москва',
+        'loc_spb': 'Санкт-Петербург',
+        'loc_million': 'Город-миллионник',
+        'loc_region': 'Областной центр',
+        'loc_small': 'Малый город',
+        'loc_village': 'Село/деревня',
+        'loc_custom': None  # Пользователь напишет сам
+    }
+    
+    selected_loc = loc_map.get(query.data)
+    
+    if query.data == 'loc_custom':
+        # Просим написать свою локацию
+        await query.edit_message_text(
+            f"{get_random_praise()}\n\n"
+            "🏙️ *Вопрос 3/18: ВАША ЛОКАЦИЯ*\n\n"
+            "Напишите название вашего города/региона:\n"
+            "_(например: Казань, Краснодарский край, Подмосковье)_",
+            parse_mode='Markdown'
+        )
+        profile.current_question = 3  # Остаемся на том же вопросе
+        return BotState.DEMOGRAPHY
+    else:
+        profile.location = selected_loc
+        profile.questions_answered += 1
+        profile.current_question += 1
+        return await ask_motivation(update, context)
+
+async def handle_custom_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка текстового ответа для локации"""
+    user_id = update.effective_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    profile.custom_location = update.message.text.strip()
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Переходим к вопросу о мотивации
+    return await ask_motivation(update, context)
+
+async def ask_motivation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о мотивации"""
+    user_id = None
+    if update.callback_query:
+        query = update.callback_query
+        user_id = query.from_user.id
+        await query.answer()
+    elif update.message:
+        user_id = update.effective_user.id
+    
+    if not user_id or user_id not in chat_memory.user_profiles:
+        return ConversationHandler.END
+    
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Вопрос 4: Мотивация (мультиселект)
+    keyboard = [
+        [InlineKeyboardButton("✅ Свобода и независимость", callback_data='mot_freedom')],
+        [InlineKeyboardButton("✅ Стабильный высокий доход", callback_data='mot_money')],
+        [InlineKeyboardButton("✅ Помощь людям", callback_data='mot_help')],
+        [InlineKeyboardButton("✅ Творческая реализация", callback_data='mot_creative')],
+        [InlineKeyboardButton("✅ Решение сложных вызовов", callback_data='mot_challenge')],
+        [InlineKeyboardButton("✅ Признание, статус", callback_data='mot_status')],
+        [InlineKeyboardButton("✅ Баланс работы и жизни", callback_data='mot_balance')],
+        [InlineKeyboardButton("✅ Наследие, долгосрочный проект", callback_data='mot_legacy')],
+        [InlineKeyboardButton("▶️ Далее", callback_data='mot_next')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    selected_count = len(profile.motivation)
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Локация сохранена!\n\n"
+        f"🎯 *Вопрос 4/18: КЛЮЧЕВАЯ МОТИВАЦИЯ*\n\n"
+        "Что для вас ВАЖНЕЕ ВСЕГО в бизнесе?\n"
+        "_(выберите 2-3 самых важных пункта)_\n\n"
+        f"✅ Выбрано: {selected_count}/3\n"
+        f"Нажмите ▶️ Далее когда выберете достаточно вариантов"
+        f"{memory_status}"
+    )
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.PERSONALITY
+
+async def handle_motivation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора мотивации"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'mot_next':
+        # Проверяем, что выбрано 2-3 пункта
+        if 2 <= len(profile.motivation) <= 3:
             profile.questions_answered += 1
             profile.current_question += 1
-            
-            # Переходим к экзистенциальному вопросу
-            memory_status = get_memory_status()
-            
-            await query.edit_message_text(
-                f"{get_random_praise()} Стиль обучения определен!\n\n"
-                f"🌍 *Вопрос 14/18: ЭКЗИСТЕНЦИАЛЬНЫЙ ВОПРОС*\n\n"
-                "ЗАДАНИЕ НА 2 МИНУТЫ РАЗМЫШЛЕНИЯ:\n\n"
-                "\"Если бы вам не нужно было зарабатывать деньги\n"
-                "и все базовые потребности были бы удовлетворены...\"\n\n"
-                "ЧЕМ БЫ ВЫ ЗАНИМАЛИСЬ?\n\n"
-                "Опишите максимально подробно, 3-5 предложений.\n"
-                "Не торопитесь, подумайте хорошо."
-                f"{memory_status}",
-                parse_mode='Markdown'
-            )
-            
-            return BotState.VALUES
+            return await ask_decision_style(update, context)
         else:
-            await query.answer(f"❌ Нужно распределить 10 баллов! Сейчас: {total_points}/10", show_alert=True)
-            return await ask_learning_distribution(update, context)
+            # Сообщаем об ошибке
+            await query.answer("❌ Пожалуйста, выберите 2-3 варианта", show_alert=True)
+            return await ask_motivation(update, context)
     
-    # Обработка изменения баллов
-    if query.data.startswith('learning_'):
-        action, method = query.data.split('_')[1:3]
-        
-        if action == 'inc':
-            if profile.learning_points_assigned < 10:
-                if method == 'practice':
-                    profile.learning_practice += 1
-                elif method == 'books':
-                    profile.learning_books += 1
-                elif method == 'courses':
-                    profile.learning_courses += 1
-                elif method == 'group':
-                    profile.learning_group += 1
-                elif method == 'observation':
-                    profile.learning_observation += 1
-                profile.learning_points_assigned += 1
-        
-        elif action == 'dec':
-            if method == 'practice' and profile.learning_practice > 0:
-                profile.learning_practice -= 1
-                profile.learning_points_assigned -= 1
-            elif method == 'books' and profile.learning_books > 0:
-                profile.learning_books -= 1
-                profile.learning_points_assigned -= 1
-            elif method == 'courses' and profile.learning_courses > 0:
-                profile.learning_courses -= 1
-                profile.learning_points_assigned -= 1
-            elif method == 'group' and profile.learning_group > 0:
-                profile.learning_group -= 1
-                profile.learning_points_assigned -= 1
-            elif method == 'observation' and profile.learning_observation > 0:
-                profile.learning_observation -= 1
-                profile.learning_points_assigned -= 1
+    # Обработка выбора мотивации
+    mot_map = {
+        'mot_freedom': 'Свобода и независимость',
+        'mot_money': 'Стабильный высокий доход',
+        'mot_help': 'Помощь людям, социальная значимость',
+        'mot_creative': 'Творческая реализация, самовыражение',
+        'mot_challenge': 'Решение интересных вызовов, азарт',
+        'mot_status': 'Признание, статус',
+        'mot_balance': 'Баланс работы и жизни',
+        'mot_legacy': 'Наследие, долгосрочный проект'
+    }
     
-    return await ask_learning_distribution(update, context)
+    selected_mot = mot_map.get(query.data)
+    if selected_mot:
+        if selected_mot in profile.motivation:
+            profile.motivation.remove(selected_mot)
+        else:
+            if len(profile.motivation) < 3:
+                profile.motivation.append(selected_mot)
+    
+    return await ask_motivation(update, context)
 
-async def ask_learning_distribution(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Вопрос о распределении баллов обучения"""
+async def ask_decision_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о стиле принятия решений"""
     user_id = update.callback_query.from_user.id
     profile = chat_memory.user_profiles[user_id]
     
-    # Создаем клавиатуру для распределения баллов
+    # Вопрос 5: Стиль принятия решений
+    keyboard = [
+        [InlineKeyboardButton("💖 Чувства и эмоции", callback_data='dec_feelings')],
+        [InlineKeyboardButton("📊 Логика и факты", callback_data='dec_logic')],
+        [InlineKeyboardButton("🤝 Совет близких/экспертов", callback_data='dec_advice')],
+        [InlineKeyboardButton("⚖️ Таблица плюсов/минусов", callback_data='dec_table')],
+        [InlineKeyboardButton("🎯 Быстрый результат", callback_data='dec_fast')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Мотивация сохранена!\n\n"
+        f"🧩 *Вопрос 5/18: СТИЛЬ ПРИНЯТИЯ РЕШЕНИЙ*\n\n"
+        "Как вы ОБЫЧНО принимаете решения?\n\n"
+        "Ситуация: Нужно выбрать между двумя проектами.\n"
+        "Какой подход вам ближе?"
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.PERSONALITY
+
+async def handle_decision_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора стиля решений"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    dec_map = {
+        'dec_feelings': 'Сначала чувства и эмоции, потом логика',
+        'dec_logic': 'Сначала логика и факты, потом чувства',
+        'dec_advice': 'Советуюсь с близкими/экспертами',
+        'dec_table': 'Составляю таблицу плюсов/минусов',
+        'dec_fast': 'Выбираю то, что быстрее принесет результат'
+    }
+    
+    profile.decision_style = dec_map.get(query.data, 'Не указано')
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Вопрос 6: Отношение к риску
+    keyboard = [
+        [InlineKeyboardButton("🔒 Только проверенные инвестиции", callback_data='risk_safe')],
+        [InlineKeyboardButton("🎓 На обучение/развитие", callback_data='risk_learning')],
+        [InlineKeyboardButton("🚀 На запуск своего дела", callback_data='risk_business')],
+        [InlineKeyboardButton("🎰 На рискованный стартап", callback_data='risk_startup')],
+        [InlineKeyboardButton("▶️ Далее с уровнем риска 5/10", callback_data='risk_next')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Интересный подход к решениям!\n\n"
+        f"🎲 *Вопрос 6/18: ОТНОШЕНИЕ К РИСКУ*\n\n"
+        "СИТУАЦИЯ: У вас есть 100,000₽ свободных денег.\n\n"
+        "На что вы готовы их использовать?\n"
+        "_(выберите один вариант)_"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.PERSONALITY
+
+async def handle_risk_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка сценария риска"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'risk_next':
+        # Пропускаем выбор сценария, оставляем уровень риска 5/10
+        profile.risk_scenario = 'Не выбрано'
+        profile.questions_answered += 1
+        profile.current_question += 1
+        return await ask_risk_level(update, context)
+    
+    risk_map = {
+        'risk_safe': 'Только на проверенные инвестиции (<10% годовых)',
+        'risk_learning': 'На обучение/развитие навыков',
+        'risk_business': 'На запуск своего небольшого дела',
+        'risk_startup': 'На рискованный, но перспективный стартап'
+    }
+    
+    profile.risk_scenario = risk_map.get(query.data, 'Не указано')
+    
+    # После выбора сценария спрашиваем уровень риска
+    return await ask_risk_level(update, context)
+
+async def ask_risk_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос об уровне риска (ползунок)"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Создаем клавиатуру с ползунком риска
     keyboard = []
     
-    # Заголовок
-    keyboard.append([InlineKeyboardButton("📚 РАСПРЕДЕЛИТЕ 10 БАЛЛОВ:", callback_data='learning_title')])
+    # Первая строка: кнопки уменьшения/увеличения
+    keyboard.append([
+        InlineKeyboardButton("◀️ Меньше риска", callback_data='risk_decrease'),
+        InlineKeyboardButton(f"🎲 {profile.risk_tolerance}/10", callback_data='risk_current'),
+        InlineKeyboardButton("Больше риска ▶️", callback_data='risk_increase')
+    ])
     
-    # Методы обучения с кнопками +/-
-    learning_methods = [
-        ("Практика, проб и ошибка", 'practice', profile.learning_practice),
-        ("Книги, теория", 'books', profile.learning_books),
-        ("Курсы с наставником", 'courses', profile.learning_courses),
-        ("Обучение в группе", 'group', profile.learning_group),
-        ("Наблюдение за экспертами", 'observation', profile.learning_observation)
-    ]
+    # Вторая строка: визуализация уровня риска
+    risk_bar = "🔴" * profile.risk_tolerance + "⚪" * (10 - profile.risk_tolerance)
+    keyboard.append([InlineKeyboardButton(risk_bar, callback_data='risk_bar')])
     
-    for method_name, method_key, current_points in learning_methods:
-        row = [
-            InlineKeyboardButton("➖", callback_data=f'learning_dec_{method_key}'),
-            InlineKeyboardButton(f"{method_name}: {current_points}", callback_data=f'learning_info_{method_key}'),
-            InlineKeyboardButton("➕", callback_data=f'learning_inc_{method_key}')
-        ]
-        keyboard.append(row)
-    
-    # Строка с итогом
-    total_points = sum([p[2] for p in learning_methods])
-    keyboard.append([InlineKeyboardButton(f"🎯 ИТОГО: {total_points}/10 баллов", callback_data='learning_total')])
-    
-    # Кнопка завершения
-    keyboard.append([InlineKeyboardButton("✅ Завершить распределение", callback_data='learning_done')])
+    # Третья строка: кнопка подтверждения
+    keyboard.append([InlineKeyboardButton("✅ Подтвердить уровень риска", callback_data='risk_confirm')])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     memory_status = get_memory_status()
     
     text = (
-        f"{get_random_praise()} Режим работы определен!\n\n"
-        f"📚 *Вопрос 13/18: СТИЛЬ ОБУЧЕНИЯ*\n\n"
-        "КАК ВЫ ЛУЧШЕ ВСЕГО УЧИТЕСЬ НОВОМУ?\n\n"
-        "Распределите 10 баллов между форматами обучения:\n"
-        "(используйте ➖ и ➕ для изменения баллов)\n\n"
-        f"✅ Распределено: {total_points}/10 баллов"
+        f"{get_random_praise()} Сценарий сохранен!\n\n"
+        f"🎲 *Вопрос 6/18 (продолжение): УРОВЕНЬ РИСКА*\n\n"
+        "Оцените ваш общий уровень толерантности к риску:\n"
+        f"1 - максимальная осторожность, 10 - готов к высоким рискам\n\n"
+        f"Текущий уровень: *{profile.risk_tolerance}/10*\n"
+        f"Используйте кнопки для настройки"
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.PERSONALITY
+
+async def handle_risk_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка уровня риска"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'risk_decrease' and profile.risk_tolerance > 1:
+        profile.risk_tolerance -= 1
+    elif query.data == 'risk_increase' and profile.risk_tolerance < 10:
+        profile.risk_tolerance += 1
+    elif query.data == 'risk_confirm':
+        profile.questions_answered += 1
+        profile.current_question += 1
+        return await ask_energy_profile(update, context)
+    
+    return await ask_risk_level(update, context)
+
+async def ask_energy_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос об энергетическом профиле"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Вопрос 7: Энергетический профиль
+    # Сначала спросим про распределение энергии
+    keyboard = []
+    
+    # Кнопки для утренней энергии
+    keyboard.append([InlineKeyboardButton("🌅 УТРО (6:00-12:00)", callback_data='energy_title')])
+    morning_buttons = []
+    for i in range(1, 8):
+        if i == profile.energy_morning:
+            morning_buttons.append(InlineKeyboardButton(f"🔵 {i}", callback_data=f'energy_morning_{i}'))
+        else:
+            morning_buttons.append(InlineKeyboardButton(f"{i}", callback_data=f'energy_morning_{i}'))
+    keyboard.append(morning_buttons)
+    
+    # Кнопки для дневной энергии
+    keyboard.append([InlineKeyboardButton("☀️ ДЕНЬ (12:00-18:00)", callback_data='energy_title')])
+    day_buttons = []
+    for i in range(1, 8):
+        if i == profile.energy_day:
+            day_buttons.append(InlineKeyboardButton(f"🔵 {i}", callback_data=f'energy_day_{i}'))
+        else:
+            day_buttons.append(InlineKeyboardButton(f"{i}", callback_data=f'energy_day_{i}'))
+    keyboard.append(day_buttons)
+    
+    # Кнопки для вечерней энергии
+    keyboard.append([InlineKeyboardButton("🌙 ВЕЧЕР (18:00-24:00)", callback_data='energy_title')])
+    evening_buttons = []
+    for i in range(1, 8):
+        if i == profile.energy_evening:
+            evening_buttons.append(InlineKeyboardButton(f"🔵 {i}", callback_data=f'energy_evening_{i}'))
+        else:
+            evening_buttons.append(InlineKeyboardButton(f"{i}", callback_data=f'energy_evening_{i}'))
+    keyboard.append(evening_buttons)
+    
+    # Кнопка перехода к следующей части вопроса
+    keyboard.append([InlineKeyboardButton("▶️ Далее: пиковые часы", callback_data='energy_next')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Уровень риска сохранен!\n\n"
+        f"⚡ *Вопрос 7/18: ЭНЕРГЕТИЧЕСКИЙ ПРОФИЛЬ*\n\n"
+        "Как распределяется ваша ЭНЕРГИЯ в течение дня?\n"
+        "1 - минимальная энергия, 7 - максимальная\n\n"
+        f"Текущие значения:\n"
+        f"• Утро: {profile.energy_morning}/7\n"
+        f"• День: {profile.energy_day}/7\n"
+        f"• Вечер: {profile.energy_evening}/7\n\n"
+        "Нажмите на цифру чтобы изменить"
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.PERSONALITY
+
+async def handle_energy_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка уровня энергии"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'energy_next':
+        return await ask_peak_hours(update, context)
+    
+    # Обработка изменения уровня энергии
+    if query.data.startswith('energy_morning_'):
+        level = int(query.data.split('_')[2])
+        profile.energy_morning = level
+    elif query.data.startswith('energy_day_'):
+        level = int(query.data.split('_')[2])
+        profile.energy_day = level
+    elif query.data.startswith('energy_evening_'):
+        level = int(query.data.split('_')[2])
+        profile.energy_evening = level
+    
+    return await ask_energy_profile(update, context)
+
+async def ask_peak_hours(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о пиковых часах для разных типов работы"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Вопрос о пиковых часах (часть 2 вопроса 7)
+    keyboard = [
+        [InlineKeyboardButton("🌅 Утро", callback_data='peak_morning')],
+        [InlineKeyboardButton("☀️ День", callback_data='peak_day')],
+        [InlineKeyboardButton("🌙 Вечер", callback_data='peak_evening')]
+    ]
+    
+    # Создаем строки для каждого типа работы
+    analytical_text = f"Аналитическая работа: {profile.energy_analytical or '❌ не выбрано'}"
+    creative_text = f"Творческая работа: {profile.energy_creative or '❌ не выбрано'}"
+    social_text = f"Общение с людьми: {profile.energy_social or '❌ не выбрано'}"
+    
+    keyboard.insert(0, [InlineKeyboardButton(analytical_text, callback_data='select_analytical')])
+    keyboard.insert(1, [InlineKeyboardButton(creative_text, callback_data='select_creative')])
+    keyboard.insert(2, [InlineKeyboardButton(social_text, callback_data='select_social')])
+    
+    keyboard.append([InlineKeyboardButton("✅ Завершить энергетический профиль", callback_data='energy_complete')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Распределение энергии сохранено!\n\n"
+        f"⚡ *Вопрос 7/18 (продолжение): ПИКОВЫЕ ЧАСЫ*\n\n"
+        "Когда вы наиболее продуктивны для разных типов задач?\n\n"
+        "Выберите для каждого типа работы оптимальное время:\n"
+        "1. Нажмите на тип работы (например 'Аналитическая работа')\n"
+        "2. Выберите время суток\n"
+        "3. Повторите для всех трёх типов\n\n"
+        "Когда всё будет готово - нажмите 'Завершить'"
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.PERSONALITY
+
+async def handle_peak_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора пиковых часов"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Сохраняем какой тип работы мы сейчас выбираем
+    if query.data.startswith('select_'):
+        context.user_data['selecting_peak_for'] = query.data.replace('select_', '')
+        await query.answer(f"Выберите время для {context.user_data['selecting_peak_for']} работы")
+        return await ask_peak_hours(update, context)
+    
+    elif query.data.startswith('peak_'):
+        if 'selecting_peak_for' not in context.user_data:
+            await query.answer("Сначала выберите тип работы")
+            return await ask_peak_hours(update, context)
+        
+        peak_type = query.data.replace('peak_', '')
+        peak_map = {
+            'morning': 'Утро',
+            'day': 'День',
+            'evening': 'Вечер'
+        }
+        
+        work_type = context.user_data['selecting_peak_for']
+        if work_type == 'analytical':
+            profile.energy_analytical = peak_map.get(peak_type)
+        elif work_type == 'creative':
+            profile.energy_creative = peak_map.get(peak_type)
+        elif work_type == 'social':
+            profile.energy_social = peak_map.get(peak_type)
+        
+        del context.user_data['selecting_peak_for']
+    
+    elif query.data == 'energy_complete':
+        # Проверяем, что все три типа выбраны
+        if profile.energy_analytical and profile.energy_creative and profile.energy_social:
+            profile.questions_answered += 1
+            profile.current_question += 1
+            return await ask_fears(update, context)
+        else:
+            await query.answer("❌ Пожалуйста, выберите время для всех трёх типов работы", show_alert=True)
+    
+    return await ask_peak_hours(update, context)
+
+async def ask_fears(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о страхах"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Вопрос 8: Страхи (часть 1 - выбор из списка)
+    keyboard = []
+    
+    # Создаем чекбоксы для страхов
+    fear_options = [
+        ("Финансовая нестабильность", 'fear_financial'),
+        ("Не справиться технически", 'fear_technical'),
+        ("Провал, осуждение близких", 'fear_failure'),
+        ("Выгорание, потеря интереса", 'fear_burnout'),
+        ("Юридические проблемы", 'fear_legal'),
+        ("Не найти клиентов", 'fear_clients'),
+        ("Конкуренция", 'fear_competition')
+    ]
+    
+    for fear_text, fear_id in fear_options:
+        if fear_text in profile.fears_selected:
+            keyboard.append([InlineKeyboardButton(f"✅ {fear_text}", callback_data=fear_id)])
+        else:
+            keyboard.append([InlineKeyboardButton(f"□ {fear_text}", callback_data=fear_id)])
+    
+    keyboard.append([InlineKeyboardButton("▶️ Далее: описать страх", callback_data='fears_next')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    selected_count = len(profile.fears_selected)
+    
+    text = (
+        f"{get_random_praise()} Энергетический профиль готов!\n\n"
+        f"👻 *Вопрос 8/18: ГЛУБИННЫЕ СТРАХИ*\n\n"
+        "Чего вы БОЛЬШЕ ВСЕГО БОИТЕСЬ в бизнесе?\n\n"
+        "Выберите 1-2 главных страха (нажмите для выбора):\n\n"
+        f"✅ Выбрано: {selected_count}/2"
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.PERSONALITY
+
+async def handle_fears_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора страхов"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'fears_next':
+        # Проверяем, что выбрано 1-2 страха
+        if 1 <= len(profile.fears_selected) <= 2:
+            profile.questions_answered += 1
+            profile.current_question += 1
+            return await ask_custom_fear(update, context)
+        else:
+            await query.answer("❌ Пожалуйста, выберите 1-2 страха", show_alert=True)
+            return await ask_fears(update, context)
+    
+    # Обработка выбора страха
+    fear_map = {
+        'fear_financial': 'Финансовая нестабильность',
+        'fear_technical': 'Не справиться технически',
+        'fear_failure': 'Провал, осуждение близких',
+        'fear_burnout': 'Выгорание, потеря интереса',
+        'fear_legal': 'Юридические проблемы',
+        'fear_clients': 'Не найти клиентов',
+        'fear_competition': 'Конкуренция'
+    }
+    
+    selected_fear = fear_map.get(query.data)
+    if selected_fear:
+        if selected_fear in profile.fears_selected:
+            profile.fears_selected.remove(selected_fear)
+        else:
+            if len(profile.fears_selected) < 2:
+                profile.fears_selected.append(selected_fear)
+    
+    return await ask_fears(update, context)
+
+async def ask_custom_fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о страхе (текстовый ответ)"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Страхи определены!\n\n"
+        f"👻 *Вопрос 8/18 (продолжение): ОПИШИТЕ СВОЙ СТРАХ*\n\n"
+        "А теперь опишите СВОИМИ СЛОВАМИ:\n"
+        "\"Мой самый большой страх в бизнесе - это...\"\n\n"
+        "Постарайтесь быть максимально честными и подробными."
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, parse_mode='Markdown')
+    
+    return BotState.PERSONALITY
+
+async def handle_custom_fear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка текстового описания страха"""
+    user_id = update.effective_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    profile.fears_custom = update.message.text.strip()
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Переходим к вопросам о навыках
+    return await ask_skills_analytics(update, context)
+
+async def ask_skills_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о навыке аналитики"""
+    user_id = None
+    if update.callback_query:
+        user_id = update.callback_query.from_user.id
+    elif update.message:
+        user_id = update.effective_user.id
+    
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Вопрос 9: Навыки (начинаем с аналитики)
+    keyboard = []
+    
+    # Создаем строку с оценкой
+    for i in range(1, 6):
+        if i == profile.skills_analytics:
+            keyboard.append([InlineKeyboardButton(f"⭐ {i} из 5 (текущая оценка)", callback_data=f'skill_analytics_{i}')])
+        else:
+            keyboard.append([InlineKeyboardButton(f"{i}", callback_data=f'skill_analytics_{i}')])
+    
+    keyboard.append([InlineKeyboardButton("▶️ Далее", callback_data='skill_next')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Страх описан честно и открыто!\n\n"
+        f"🧠 *Вопрос 9/18: ОЦЕНКА НАВЫКОВ*\n\n"
+        "АНАЛИТИКА (логика, работа с цифрами, анализ данных)\n\n"
+        "Оцените ваш уровень по 5-балльной шкале:\n"
+        "1 - начинающий, 5 - эксперт\n\n"
+        f"Текущая оценка: *{profile.skills_analytics} из 5*"
+        f"{memory_status}"
+    )
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.SKILLS
+
+async def handle_skill_rating(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка оценки навыков"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'skill_next':
+        # Переходим к следующему навыку
+        profile.current_question += 1
+        return await ask_skills_communication(update, context)
+    
+    # Обработка оценки
+    if query.data.startswith('skill_analytics_'):
+        level = int(query.data.split('_')[2])
+        profile.skills_analytics = level
+        return await ask_skills_analytics(update, context)
+
+async def ask_skills_communication(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о навыке коммуникации"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    keyboard = []
+    for i in range(1, 6):
+        if i == profile.skills_communication:
+            keyboard.append([InlineKeyboardButton(f"💬 {i} из 5 (текущая оценка)", callback_data=f'skill_comm_{i}')])
+        else:
+            keyboard.append([InlineKeyboardButton(f"{i}", callback_data=f'skill_comm_{i}')])
+    
+    keyboard.append([InlineKeyboardButton("▶️ Далее", callback_data='skill_comm_next')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Аналитические навыки оценены!\n\n"
+        f"💬 *Вопрос 10/18: КОММУНИКАЦИЯ*\n\n"
+        "КОММУНИКАЦИЯ (убеждение, переговоры, публичные выступления)\n\n"
+        "Оцените ваш уровень по 5-балльной шкале:\n"
+        "1 - начинающий, 5 - эксперт\n\n"
+        f"Текущая оценка: *{profile.skills_communication} из 5*"
         f"{memory_status}"
     )
     
@@ -991,48 +1674,22 @@ async def ask_learning_distribution(update: Update, context: ContextTypes.DEFAUL
     
     return BotState.SKILLS
 
-# Продолжение остальных вопросов о навыках...
-async def handle_work_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка стиля работы"""
+async def handle_skill_communication(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка оценки коммуникации"""
     query = update.callback_query
     await query.answer()
     
     user_id = query.from_user.id
     profile = chat_memory.user_profiles[user_id]
     
-    work_map = {
-        'work_alone': 'В одиночку - полный контроль',
-        'work_pair': 'В паре - взаимодополнение',
-        'work_team': 'В команде 3-5 человек',
-        'work_structure': 'В структуре с четкими ролями',
-        'work_remote': 'Удаленно, с периодическими встречами',
-        'work_flexible': 'Гибко - меняю форматы под задачи'
-    }
-    
-    profile.work_style = work_map.get(query.data, 'Не указано')
-    profile.questions_answered += 1
-    profile.current_question += 1
-    
-    # Переходим к распределению баллов обучения
-    return await ask_learning_distribution(update, context)
-
-# Добавляем обработку других навыков
-async def handle_skill_design(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка оценки дизайна"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    profile = chat_memory.user_profiles[user_id]
-    
-    if query.data == 'skill_design_next':
+    if query.data == 'skill_comm_next':
         profile.current_question += 1
-        return await ask_skills_organization(update, context)
-    
-    if query.data.startswith('skill_design_'):
-        level = int(query.data.split('_')[2])
-        profile.skills_design = level
         return await ask_skills_design(update, context)
+    
+    if query.data.startswith('skill_comm_'):
+        level = int(query.data.split('_')[2])
+        profile.skills_communication = level
+        return await ask_skills_communication(update, context)
 
 async def ask_skills_design(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Вопрос о навыке дизайна"""
@@ -1066,8 +1723,22 @@ async def ask_skills_design(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return BotState.SKILLS
 
-# Аналогично добавляем остальные навыки: organization, manual, eq
-# Для краткости покажу только один пример, остальные по аналогии
+async def handle_skill_design(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка оценки дизайна"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'skill_design_next':
+        profile.current_question += 1
+        return await ask_skills_organization(update, context)
+    
+    if query.data.startswith('skill_design_'):
+        level = int(query.data.split('_')[2])
+        profile.skills_design = level
+        return await ask_skills_design(update, context)
 
 async def ask_skills_organization(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Вопрос о навыке организации"""
@@ -1101,7 +1772,782 @@ async def ask_skills_organization(update: Update, context: ContextTypes.DEFAULT_
     
     return BotState.SKILLS
 
-# ... и так далее для manual и eq
+async def handle_skills_organization(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка оценки организации"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'skill_org_next':
+        profile.current_question += 1
+        return await ask_skills_manual(update, context)
+    
+    if query.data.startswith('skill_org_'):
+        level = int(query.data.split('_')[2])
+        profile.skills_organization = level
+        return await ask_skills_organization(update, context)
+
+async def ask_skills_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о навыке ручного труда"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    keyboard = []
+    for i in range(1, 6):
+        if i == profile.skills_manual:
+            keyboard.append([InlineKeyboardButton(f"🔧 {i} из 5 (текущая оценка)", callback_data=f'skill_manual_{i}')])
+        else:
+            keyboard.append([InlineKeyboardButton(f"{i}", callback_data=f'skill_manual_{i}')])
+    
+    keyboard.append([InlineKeyboardButton("▶️ Далее", callback_data='skill_manual_next')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Организация оценена!\n\n"
+        f"🔧 *Вопрос 13/18: РУЧНОЙ ТРУД/МАСТЕРСТВО*\n\n"
+        "РУЧНОЙ ТРУД/МАСТЕРСТВО (работа руками, ремонт, создание физических вещей)\n\n"
+        "Оцените ваш уровень по 5-балльной шкале:\n"
+        "1 - начинающий, 5 - эксперт\n\n"
+        f"Текущая оценка: *{profile.skills_manual} из 5*"
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.SKILLS
+
+async def handle_skills_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка оценки ручного труда"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'skill_manual_next':
+        profile.current_question += 1
+        return await ask_skills_eq(update, context)
+    
+    if query.data.startswith('skill_manual_'):
+        level = int(query.data.split('_')[2])
+        profile.skills_manual = level
+        return await ask_skills_manual(update, context)
+
+async def ask_skills_eq(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о навыке эмоционального интеллекта"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    keyboard = []
+    for i in range(1, 6):
+        if i == profile.skills_eq:
+            keyboard.append([InlineKeyboardButton(f"❤️ {i} из 5 (текущая оценка)", callback_data=f'skill_eq_{i}')])
+        else:
+            keyboard.append([InlineKeyboardButton(f"{i}", callback_data=f'skill_eq_{i}')])
+    
+    keyboard.append([InlineKeyboardButton("▶️ Далее", callback_data='skill_eq_next')])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Ручной труд оценен!\n\n"
+        f"❤️ *Вопрос 14/18: ЭМОЦИОНАЛЬНЫЙ ИНТЕЛЛЕКТ*\n\n"
+        "ЭМОЦИОНАЛЬНЫЙ ИНТЕЛЛЕКТ (понимание эмоций, эмпатия, работа с людьми)\n\n"
+        "Оцените ваш уровень по 5/5-балльной шкале:\n"
+        "1 - начинающий, 5 - эксперт\n\n"
+        f"Текущая оценка: *{profile.skills_eq} из 5*"
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.SKILLS
+
+async def handle_skills_eq(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка оценки EQ"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'skill_eq_next':
+        profile.current_question += 1
+        return await ask_superpower(update, context)
+    
+    if query.data.startswith('skill_eq_'):
+        level = int(query.data.split('_')[2])
+        profile.skills_eq = level
+        return await ask_skills_eq(update, context)
+
+async def ask_superpower(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о суперсиле"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Вопрос 10: Суперсила
+    keyboard = [
+        [InlineKeyboardButton("🔮 ПРЕДВИДЕНИЕ - вижу тренды", callback_data='power_vision')],
+        [InlineKeyboardButton("💬 УБЕЖДЕНИЕ - договариваюсь", callback_data='power_persuasion')],
+        [InlineKeyboardButton("🔧 ИНЖЕНЕРИЯ - решаю задачи", callback_data='power_engineering')],
+        [InlineKeyboardButton("🎨 СОЗИДАНИЕ - создаю красивое", callback_data='power_creation')],
+        [InlineKeyboardButton("👁️ ПРОНИКНОВЕНИЕ - понимаю мотивы", callback_data='power_insight')],
+        [InlineKeyboardButton("⚡ ЭНЕРГИЯ - работаю на энтузиазме", callback_data='power_energy')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    text = (
+        f"{get_random_praise()} Все навыки оценены!\n\n"
+        f"🌟 *Вопрос 15/18: ВАША СУПЕРСИЛА*\n\n"
+        "ЕСЛИ БЫ ВЫ БЫЛИ СУПЕРГЕРОЕМ, ваша суперсила была бы:\n\n"
+        "Выберите одну, которая больше всего вам подходит:"
+        f"{memory_status}"
+    )
+    
+    await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    
+    return BotState.SKILLS
+
+async def handle_superpower(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора суперсилы"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    power_map = {
+        'power_vision': 'Предвидение трендов и возможностей',
+        'power_persuasion': 'Умение убеждать и вдохновлять',
+        'power_engineering': 'Решение сложных технических проблем',
+        'power_creation': 'Создание красивых и функциональных вещей',
+        'power_insight': 'Понимание скрытых мотивов людей',
+        'power_energy': 'Могу работать сутками на энтузиазме'
+    }
+    
+    profile.superpower = power_map.get(query.data, 'Не указано')
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Переходим к вопросу о режиме работы
+    keyboard = [
+        [InlineKeyboardButton("👤 В одиночку", callback_data='work_alone')],
+        [InlineKeyboardButton("👥 В паре", callback_data='work_pair')],
+        [InlineKeyboardButton("👨‍👩‍👧‍👦 В команде 3-5 человек", callback_data='work_team')],
+        [InlineKeyboardButton("🏢 В структуре с ролями", callback_data='work_structure')],
+        [InlineKeyboardButton("🌐 Удаленно", callback_data='work_remote')],
+        [InlineKeyboardButton("🤸 Гибко - меняю форматы", callback_data='work_flexible')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Отличная суперсила!\n\n"
+        f"🔄 *Вопрос 16/18: РЕЖИМ РАБОТЫ*\n\n"
+        "Как вы ЛУЧШЕ ВСЕГО РАБОТАЕТЕ?\n\n"
+        "Выберите вашу идеальную рабочую среду:"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.SKILLS
+
+async def handle_work_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка стиля работы"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    work_map = {
+        'work_alone': 'В одиночку - полный контроль',
+        'work_pair': 'В паре - взаимодополнение',
+        'work_team': 'В команде 3-5 человек',
+        'work_structure': 'В структуре с четкими ролями',
+        'work_remote': 'Удаленно, с периодическими встречами',
+        'work_flexible': 'Гибко - меняю форматы под задачи'
+    }
+    
+    profile.work_style = work_map.get(query.data, 'Не указано')
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Переходим к вопросу об обучении
+    await query.edit_message_text(
+        f"{get_random_praise()} Режим работы определен!\n\n"
+        f"📚 *Вопрос 17/18: СТИЛЬ ОБУЧЕНИЯ*\n\n"
+        "Как вы лучше всего учитесь новому?\n\n"
+        "Пожалуйста, напишите одним-двумя предложениями:\n"
+        "\"Я лучше всего учусь, когда...\"",
+        parse_mode='Markdown'
+    )
+    
+    return BotState.VALUES
+
+async def handle_learning_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка стиля обучения (текстовый ответ)"""
+    user_id = update.effective_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    # Для простоты сохраняем как строку
+    learning_text = update.message.text.strip()
+    profile.learning_style['custom'] = learning_text
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Переходим к экзистенциальному вопросу
+    memory_status = get_memory_status()
+    
+    await update.message.reply_text(
+        f"{get_random_praise()} Стиль обучения понятен!\n\n"
+        f"🌍 *Вопрос 18/18: ЭКЗИСТЕНЦИАЛЬНЫЙ ВОПРОС*\n\n"
+        "ЗАДАНИЕ НА 2 МИНУТЫ РАЗМЫШЛЕНИЯ:\n\n"
+        "\"Если бы вам не нужно было зарабатывать деньги\n"
+        "и все базовые потребности были бы удовлетворены...\"\n\n"
+        "ЧЕМ БЫ ВЫ ЗАНИМАЛИСЬ?\n\n"
+        "Опишите максимально подробно, 3-5 предложений.\n"
+        "Не торопитесь, подумайте хорошо."
+        f"{memory_status}",
+        parse_mode='Markdown'
+    )
+    
+    return BotState.VALUES
+
+async def handle_existential(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка экзистенциального ответа"""
+    user_id = update.effective_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    profile.existential_answer = update.message.text.strip()
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Переходим к вопросу о состоянии потока
+    memory_status = get_memory_status()
+    
+    await update.message.reply_text(
+        f"{get_random_praise()} Глубокий и осмысленный ответ!\n\n"
+        f"⏳ *Вопрос 19/18: СОСТОЯНИЕ ПОТОКА*\n\n"
+        "ВСПОМНИТЕ МОМЕНТ, когда вы полностью погружались\n"
+        "в дело и теряли чувство времени:\n\n"
+        "Какое это было дело? Опишите одним предложением.\n"
+        "\"Это было, когда я...\"",
+        parse_mode='Markdown'
+    )
+    
+    return BotState.VALUES
+
+async def handle_flow_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка опыта потока"""
+    user_id = update.effective_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    profile.flow_experience = update.message.text.strip()
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Спрашиваем про ощущения
+    memory_status = get_memory_status()
+    
+    await update.message.reply_text(
+        f"{get_random_praise()} Замечательный пример потока!\n\n"
+        f"⏳ *Вопрос 19/18 (продолжение): ОЩУЩЕНИЯ*\n\n"
+        "Теперь опишите свои ОЩУЩЕНИЯ в тот момент:\n"
+        "\"Я чувствовал(а)...\" (2-3 предложения)"
+        f"{memory_status}",
+        parse_mode='Markdown'
+    )
+    
+    return BotState.VALUES
+
+async def handle_flow_feeling(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка ощущений в потоке"""
+    user_id = update.effective_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    profile.flow_feeling = update.message.text.strip()
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Переходим к вопросу об идеальном клиенте
+    keyboard = [
+        [InlineKeyboardButton("20-30 лет", callback_data='client_20-30')],
+        [InlineKeyboardButton("30-40 лет", callback_data='client_30-40')],
+        [InlineKeyboardButton("40-50 лет", callback_data='client_40-50')],
+        [InlineKeyboardButton("50+ лет", callback_data='client_50+')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await update.message.reply_text(
+        f"{get_random_praise()} Ощущения описаны ярко!\n\n"
+        f"👥 *Вопрос 20/18: ИДЕАЛЬНЫЙ КЛИЕНТ*\n\n"
+        "Опишите человека, с которым вам было бы\n"
+        "ИНТЕРЕСНО и ПРИЯТНО работать:\n\n"
+        "1. Выберите возрастную группу:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.VALUES
+
+async def handle_ideal_client_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка возраста идеального клиента"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    age_map = {
+        'client_20-30': '20-30 лет',
+        'client_30-40': '30-40 лет',
+        'client_40-50': '40-50 лет',
+        'client_50+': '50+ лет'
+    }
+    
+    profile.ideal_client_age = age_map.get(query.data, 'Не указано')
+    
+    # Спрашиваем сферу деятельности
+    keyboard = [
+        [InlineKeyboardButton("💻 IT/Технологии", callback_data='field_it')],
+        [InlineKeyboardButton("🎨 Творчество/Дизайн", callback_data='field_creative')],
+        [InlineKeyboardButton("💼 Бизнес/Предпринимательство", callback_data='field_business')],
+        [InlineKeyboardButton("📚 Образование", callback_data='field_education')],
+        [InlineKeyboardButton("🏥 Здоровье/Красота", callback_data='field_health')],
+        [InlineKeyboardButton("🌿 Другое", callback_data='field_other')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Возраст клиента выбран!\n\n"
+        f"👥 *Вопрос 20/18 (продолжение): СФЕРА*\n\n"
+        "2. Выберите сферу деятельности вашего идеального клиента:"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.VALUES
+
+async def handle_ideal_client_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка сферы идеального клиента"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    field_map = {
+        'field_it': 'IT/Технологии',
+        'field_creative': 'Творчество/Дизайн',
+        'field_business': 'Бизнес/Предпринимательство',
+        'field_education': 'Образование',
+        'field_health': 'Здоровье/Красота',
+        'field_other': 'Другое'
+    }
+    
+    profile.ideal_client_field = field_map.get(query.data, 'Не указано')
+    
+    # Спрашиваем главную "боль"
+    keyboard = [
+        [InlineKeyboardButton("⏰ Не хватает времени", callback_data='pain_time')],
+        [InlineKeyboardButton("📊 Нет системности", callback_data='pain_system')],
+        [InlineKeyboardButton("🎓 Нет экспертизы", callback_data='pain_expertise')],
+        [InlineKeyboardButton("👥 Нет клиентов", callback_data='pain_clients')],
+        [InlineKeyboardButton("💰 Не хватает денег", callback_data='pain_money')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Сфера определена!\n\n"
+        f"👥 *Вопрос 20/18 (продолжение): БОЛЬ*\n\n"
+        "3. Какая главная \"боль\" у вашего идеального клиента?"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.VALUES
+
+async def handle_ideal_client_pain(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка боли идеального клиента"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    pain_map = {
+        'pain_time': 'Не хватает времени',
+        'pain_system': 'Нет системности',
+        'pain_expertise': 'Нет экспертизы',
+        'pain_clients': 'Нет клиентов',
+        'pain_money': 'Не хватает денег'
+    }
+    
+    profile.ideal_client_pain = pain_map.get(query.data, 'Не указано')
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Просим описать детали текстом
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Боль клиента понятна!\n\n"
+        f"👥 *Вопрос 20/18 (завершение): ДЕТАЛИ*\n\n"
+        "4. Теперь добавьте деталей одним-двумя предложениями:\n"
+        "\"Мне нравится работать с людьми, которые...\""
+        f"{memory_status}",
+        parse_mode='Markdown'
+    )
+    
+    return BotState.VALUES
+
+async def handle_ideal_client_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка деталей идеального клиента"""
+    user_id = update.effective_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    profile.ideal_client_details = update.message.text.strip()
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Переходим к вопросам об ограничениях
+    keyboard = [
+        [InlineKeyboardButton("💰 < 50,000₽", callback_data='budget_50k')],
+        [InlineKeyboardButton("💰 50,000-200,000₽", callback_data='budget_200k')],
+        [InlineKeyboardButton("💰 200,000-500,000₽", callback_data='budget_500k')],
+        [InlineKeyboardButton("💰 > 500,000₽", callback_data='budget_more')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await update.message.reply_text(
+        f"{get_random_praise()} Клиент описан отлично!\n\n"
+        f"🛠️ *Вопрос 21/18: РЕСУРСНАЯ КАРТА*\n\n"
+        "ЧТО У ВАС УЖЕ ЕСТЬ ДЛЯ СТАРТА?\n\n"
+        "1. ДЕНЬГИ для инвестиций:\n"
+        "_(выберите примерный диапазон)_"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.LIMITATIONS
+
+async def handle_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка бюджета"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    budget_map = {
+        'budget_50k': '< 50,000₽',
+        'budget_200k': '50,000-200,000₽',
+        'budget_500k': '200,000-500,000₽',
+        'budget_more': '> 500,000₽'
+    }
+    
+    profile.budget = budget_map.get(query.data, 'Не указано')
+    
+    # Спрашиваем про оборудование
+    keyboard = [
+        [InlineKeyboardButton("💻 Компьютер/ноутбук", callback_data='equip_computer')],
+        [InlineKeyboardButton("📷 Камера/фотоаппарат", callback_data='equip_camera')],
+        [InlineKeyboardButton("🔧 Специнструменты", callback_data='equip_tools')],
+        [InlineKeyboardButton("🏠 Помещение/мастерская", callback_data='equip_space')],
+        [InlineKeyboardButton("▶️ Далее", callback_data='equip_next')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    selected_equip = len(profile.equipment)
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Бюджет определен!\n\n"
+        f"🛠️ *Вопрос 21/18 (продолжение): ОБОРУДОВАНИЕ*\n\n"
+        "2. Какое оборудование у вас уже есть?\n"
+        "_(можно выбрать несколько)_\n\n"
+        f"✅ Выбрано: {selected_equip}"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.LIMITATIONS
+
+async def handle_equipment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка оборудования"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'equip_next':
+        # Переходим к знаниям/доступу
+        profile.questions_answered += 1
+        return await ask_knowledge_assets(update, context)
+    
+    equip_map = {
+        'equip_computer': 'Компьютер/ноутбук',
+        'equip_camera': 'Камера/фотоаппарат',
+        'equip_tools': 'Специнструменты',
+        'equip_space': 'Помещение/мастерская'
+    }
+    
+    selected_equip = equip_map.get(query.data)
+    if selected_equip:
+        if selected_equip in profile.equipment:
+            profile.equipment.remove(selected_equip)
+        else:
+            profile.equipment.append(selected_equip)
+    
+    return await handle_budget(update, context)
+
+async def ask_knowledge_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о знаниях и доступе"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    keyboard = [
+        [InlineKeyboardButton("🤝 Профессиональные связи", callback_data='know_connections')],
+        [InlineKeyboardButton("🎓 Уникальная экспертиза", callback_data='know_expertise')],
+        [InlineKeyboardButton("📊 Доступ к нишевой информации", callback_data='know_info')],
+        [InlineKeyboardButton("🌟 Личный бренд/аудитория", callback_data='know_brand')],
+        [InlineKeyboardButton("▶️ Далее", callback_data='know_next')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    selected_knowledge = len(profile.knowledge_assets)
+    
+    await update.callback_query.edit_message_text(
+        f"{get_random_praise()} Оборудование учтено!\n\n"
+        f"🛠️ *Вопрос 21/18 (продолжение): ЗНАНИЯ/ДОСТУП*\n\n"
+        "3. Какие нематериальные активы у вас есть?\n"
+        "_(можно выбрать несколько)_\n\n"
+        f"✅ Выбрано: {selected_knowledge}"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.LIMITATIONS
+
+async def handle_knowledge_assets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка знаний и доступа"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    if query.data == 'know_next':
+        profile.current_question += 1
+        return await ask_time_budget(update, context)
+    
+    know_map = {
+        'know_connections': 'Профессиональные связи',
+        'know_expertise': 'Уникальная экспертиза',
+        'know_info': 'Доступ к нишевой информации',
+        'know_brand': 'Личный бренд/аудитория'
+    }
+    
+    selected_know = know_map.get(query.data)
+    if selected_know:
+        if selected_know in profile.knowledge_assets:
+            profile.knowledge_assets.remove(selected_know)
+        else:
+            profile.knowledge_assets.append(selected_know)
+    
+    return await ask_knowledge_assets(update, context)
+
+async def ask_time_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Вопрос о временном бюджете"""
+    user_id = update.callback_query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    keyboard = [
+        [InlineKeyboardButton("⏰ 5-10 часов", callback_data='time_5-10')],
+        [InlineKeyboardButton("⏰ 10-20 часов", callback_data='time_10-20')],
+        [InlineKeyboardButton("⏰ 20-30 часов", callback_data='time_20-30')],
+        [InlineKeyboardButton("⏰ 30-40 часов", callback_data='time_30-40')],
+        [InlineKeyboardButton("⏰ 40+ часов", callback_data='time_40+')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await update.callback_query.edit_message_text(
+        f"{get_random_praise()} Ресурсная карта составлена!\n\n"
+        f"⏰ *Вопрос 22/18: ВРЕМЕННОЙ БЮДЖЕТ*\n\n"
+        "СКОЛЬКО ЧАСОВ В НЕДЕЛЮ вы реально можете\n"
+        "уделить бизнесу НА СТАРТЕ?\n\n"
+        "Будьте реалистичны, учитывайте семью, хобби, отдых!"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.LIMITATIONS
+
+async def handle_time_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка временного бюджета"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    time_map = {
+        'time_5-10': '5-10 часов (параллельно с основной работой)',
+        'time_10-20': '10-20 часов (серьезный side-project)',
+        'time_20-30': '20-30 часов (почти полный день)',
+        'time_30-40': '30-40 часов (можно полностью погрузиться)',
+        'time_40+': '40+ часов (готов(а) работать сутками)'
+    }
+    
+    profile.time_per_week = time_map.get(query.data, 'Не указано')
+    profile.questions_answered += 1
+    profile.current_question += 1
+    
+    # Последний вопрос: масштаб и формат
+    keyboard = [
+        [InlineKeyboardButton("📍 Локальный (район/город)", callback_data='scale_local')],
+        [InlineKeyboardButton("🗺️ Региональный (область)", callback_data='scale_region')],
+        [InlineKeyboardButton("🇷🇺 Национальный (Россия)", callback_data='scale_national')],
+        [InlineKeyboardButton("🌍 Международный", callback_data='scale_international')],
+        [InlineKeyboardButton("🌐 Онлайн-глобальный", callback_data='scale_online')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Время учтено реалистично!\n\n"
+        f"📍 *ЗАКЛЮЧИТЕЛЬНЫЙ ВОПРОС: МАСШТАБ*\n\n"
+        "КАКОЙ МАСШТАБ БИЗНЕСА вас привлекает?\n\n"
+        "Выберите один вариант:"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.LIMITATIONS
+
+async def handle_business_scale(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка масштаба бизнеса"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    scale_map = {
+        'scale_local': 'Локальный (район/город) - вижу клиентов лично',
+        'scale_region': 'Региональный (область) - периодические поездки',
+        'scale_national': 'Национальный (Россия) - работаю удаленно',
+        'scale_international': 'Международный - интерес к другим культурам',
+        'scale_online': 'Онлайн-глобальный - без географических границ'
+    }
+    
+    profile.business_scale = scale_map.get(query.data, 'Не указано')
+    
+    # Последний подвопрос: формат
+    keyboard = [
+        [InlineKeyboardButton("🌐 Только онлайн", callback_data='format_online')],
+        [InlineKeyboardButton("🏪 Только офлайн", callback_data='format_offline')],
+        [InlineKeyboardButton("🔄 Гибрид (онлайн + офлайн)", callback_data='format_hybrid')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"{get_random_praise()} Масштаб выбран!\n\n"
+        f"📍 *ЗАКЛЮЧИТЕЛЬНЫЙ ВОПРОС (последний!): ФОРМАТ*\n\n"
+        "ПРЕДПОЧТЕНИЯ ПО ФОРМАТУ РАБОТЫ:\n\n"
+        "Выберите один вариант:"
+        f"{memory_status}",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return BotState.LIMITATIONS
+
+async def handle_business_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка формата бизнеса"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    profile = chat_memory.user_profiles[user_id]
+    
+    format_map = {
+        'format_online': 'Только онлайн',
+        'format_offline': 'Только офлайн',
+        'format_hybrid': 'Гибрид (онлайн + офлайн встречи)'
+    }
+    
+    profile.business_format = format_map.get(query.data, 'Не указано')
+    profile.questions_answered += 1
+    
+    # АНКЕТА ЗАВЕРШЕНА!
+    memory_status = get_memory_status()
+    
+    await query.edit_message_text(
+        f"🎉 *БРАВО! АНКЕТА ЗАВЕРШЕНА!*\n\n"
+        f"✅ Отвечено: {profile.questions_answered} вопросов\n"
+        f"⏱️ Время заполнения: ~15-20 минут\n"
+        f"🎯 Глубина анализа: профессиональный уровень\n\n"
+        "🤖 *Запускаю AI-анализ...*\n"
+        "1. Анализирую психологический профиль\n"
+        "2. Ищу скрытый потенциал\n"
+        "3. Подбираю 8 уникальных ниш\n"
+        "4. Готовлю персонализированные планы\n\n"
+        "⏳ *Это займет 1-2 минуты*\n"
+        "Пока AI работает, можете отдохнуть ☕"
+        f"{memory_status}",
+        parse_mode='Markdown'
+    )
+    
+    # Запускаем анализ
+    return await start_ai_analysis(update, context)
 
 # ==================== AI АНАЛИЗ И ГЕНЕРАЦИЯ ====================
 
@@ -1417,49 +2863,8 @@ async def handle_niche_navigation(update: Update, context: ContextTypes.DEFAULT_
     
     return await show_current_niche(update, context)
 
-# ==================== HEALTH CHECK ====================
-async def health_check(request):
-    """Проверка здоровья сервиса"""
-    status = {
-        "status": "OK",
-        "version": "6.0",
-        "timestamp": datetime.now().isoformat(),
-        "openai_available": openai_service.is_available,
-        "statistics": {
-            "active_users": len(chat_memory.user_profiles),
-            "total_messages": chat_memory.total_messages,
-            "token_usage": {
-                "total": chat_memory.token_usage.total_tokens,
-                "prompt": chat_memory.token_usage.prompt_tokens,
-                "completion": chat_memory.token_usage.completion_tokens,
-                "estimated_cost": chat_memory.token_usage.estimated_cost
-            },
-            "memory_usage_percent": chat_memory.get_memory_usage_percentage()
-        }
-    }
-    return web.Response(
-        text=json.dumps(status, ensure_ascii=False, indent=2),
-        content_type='application/json'
-    )
-
-async def run_health_server():
-    """Запуск сервера для проверки здоровья"""
-    app = web.Application()
-    app.router.add_get('/health', health_check)
-    app.router.add_get('/', health_check)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    port = int(os.getenv("PORT", "10000"))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    
-    logger.info(f"✅ Health check сервер запущен на порту {port}")
-    return runner
-
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
-def main():
+async def main():
     """Основная функция"""
     
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -1505,9 +2910,10 @@ def main():
                 CallbackQueryHandler(handle_skill_communication, pattern='^skill_comm_'),
                 CallbackQueryHandler(handle_skill_design, pattern='^skill_design_'),
                 CallbackQueryHandler(handle_skills_organization, pattern='^skill_org_'),
+                CallbackQueryHandler(handle_skills_manual, pattern='^skill_manual_'),
+                CallbackQueryHandler(handle_skills_eq, pattern='^skill_eq_'),
                 CallbackQueryHandler(handle_superpower, pattern='^power_'),
-                CallbackQueryHandler(handle_work_style, pattern='^work_'),
-                CallbackQueryHandler(handle_learning_distribution, pattern='^learning_')
+                CallbackQueryHandler(handle_work_style, pattern='^work_')
             ],
             BotState.VALUES: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_existential),
@@ -1524,11 +2930,7 @@ def main():
                 CallbackQueryHandler(handle_knowledge_assets, pattern='^know_'),
                 CallbackQueryHandler(handle_time_budget, pattern='^time_'),
                 CallbackQueryHandler(handle_business_scale, pattern='^scale_'),
-                CallbackQueryHandler(handle_business_format, pattern='^format_'),
-                CallbackQueryHandler(start_ai_analysis, pattern='^analysis_start$')
-            ],
-            BotState.ANALYZING: [
-                # Здесь будет обработка состояния анализа
+                CallbackQueryHandler(handle_business_format, pattern='^format_')
             ],
             BotState.NICHE_SELECTION: [
                 CallbackQueryHandler(handle_niche_navigation, pattern='^(niche_|save_|show_|start_|back_)')
@@ -1545,24 +2947,91 @@ def main():
     
     application.add_handler(conv_handler)
     
+    # Запускаем health сервер
+    try:
+        runner = await run_health_server()
+    except Exception as e:
+        logger.error(f"❌ Не удалось запустить health сервер: {e}")
+        runner = None
+    
     # Запускаем бота
-    async def run_bot():
+    try:
         await application.initialize()
         await application.start()
-        await application.updater.start_polling(drop_pending_updates=True)
+        
+        # Используем webhook для Render
+        webhook_url = os.getenv("RENDER_EXTERNAL_URL")
+        if webhook_url:
+            PORT = int(os.getenv("PORT", 10000))
+            await application.bot.set_webhook(f"{webhook_url}/{token}")
+            logger.info(f"🌐 Webhook установлен: {webhook_url}")
+        else:
+            await application.updater.start_polling(drop_pending_updates=True)
+            logger.info("📡 Режим polling")
         
         logger.info("✅ Бот запущен и готов к работе!")
         
         # Бесконечный цикл
         while True:
             await asyncio.sleep(3600)
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка запуска бота: {e}")
+    finally:
+        # Очистка
+        try:
+            if application.updater:
+                await application.updater.stop()
+            await application.stop()
+            await application.shutdown()
+            if runner:
+                await runner.cleanup()
+        except:
+            pass
+
+async def run_health_server():
+    """Запуск сервера для проверки здоровья"""
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    app.router.add_get('/', health_check)
     
-    # Запускаем асинхронно
-    asyncio.run(run_bot())
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.getenv("PORT", "10000"))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    
+    logger.info(f"✅ Health check сервер запущен на порту {port}")
+    return runner
+
+async def health_check(request):
+    """Проверка здоровья сервиса"""
+    status = {
+        "status": "OK",
+        "version": "6.0",
+        "timestamp": datetime.now().isoformat(),
+        "openai_available": openai_service.is_available,
+        "statistics": {
+            "active_users": len(chat_memory.user_profiles),
+            "total_messages": chat_memory.total_messages,
+            "token_usage": {
+                "total": chat_memory.token_usage.total_tokens,
+                "prompt": chat_memory.token_usage.prompt_tokens,
+                "completion": chat_memory.token_usage.completion_tokens,
+                "estimated_cost": chat_memory.token_usage.estimated_cost
+            },
+            "memory_usage_percent": chat_memory.get_memory_usage_percentage()
+        }
+    }
+    return web.Response(
+        text=json.dumps(status, ensure_ascii=False, indent=2),
+        content_type='application/json'
+    )
 
 if __name__ == '__main__':
     try:
-        main()
+        asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("⏹ Бот остановлен")
     except Exception as e:
