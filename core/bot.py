@@ -1,9 +1,15 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Основной класс бота
+Основной класс бота Бизнес-Навигатора
 """
+
 import logging
-import asyncio
-from typing import Optional
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+# ИЗМЕНЕНИЕ 1: Убрали импорт BotConfig отсюда
+# Вместо этого передаем config как параметр в __init__
 
 from telegram.ext import (
     Application,
@@ -13,189 +19,187 @@ from telegram.ext import (
     filters
 )
 
-from config.settings import BotConfig
+from core.question_engine import QuestionEngine
 from services.data_manager import DataManager
 from services.openai_service import OpenAIService
-from core.question_engine import QuestionEngine
-from handlers.commands import CommandHandlers
-from handlers.callbacks import CallbackHandlers
-from handlers.questionnaire import QuestionnaireHandler
+from services.payment_service import PaymentService
+from handlers.commands import (
+    start_command,
+    help_command,
+    stats_command,
+    balance_command,
+    restart_command
+)
+from handlers.callbacks import (
+    handle_callback_query,
+    handle_multiselect,
+    handle_slider
+)
+from handlers.questionnaire import handle_text_answer
+from models.enums import BotState
+from models.session import UserSession
 
 logger = logging.getLogger(__name__)
 
 class BusinessNavigatorBot:
-    """Основной класс бота"""
+    """Основной класс бота Бизнес-Навигатора"""
     
-    def __init__(self, config: BotConfig):
+    def __init__(self, config):  # ИЗМЕНЕНИЕ 2: config передается как параметр
+        """
+        Инициализация бота
+        
+        Args:
+            config: Объект конфигурации BotConfig
+        """
         self.config = config
-        self.data_manager = DataManager(config.session_timeout_hours)
-        self.openai_service = None
-        self.question_engine = None
-        self.command_handlers = None
-        self.callback_handlers = None
-        self.questionnaire_handler = None
-        self.application = None
+        self.application: Optional[Application] = None
+        self.data_manager = DataManager()
+        self.question_engine = QuestionEngine(self)
+        self.openai_service = OpenAIService(config) if config.openai_api_key else None
+        self.payment_service = PaymentService()
         
-        # Инициализация сервисов
-        self._initialize_services()
-        
-        # Создание приложения Telegram
-        self._create_application()
-        
-        logger.info("🤖 Бизнес-Навигатор инициализирован")
-    
-    def _initialize_services(self):
-        """Инициализировать сервисы"""
-        # OpenAI сервис
-        if self.config.openai_api_key:
-            self.openai_service = OpenAIService(self.config)
-        else:
-            logger.warning("⚠️ OpenAI API ключ не установлен, AI функции отключены")
-        
-        # Движок вопросов
-        self.question_engine = QuestionEngine(self.config)
-        
-        # Обработчики
-        self.questionnaire_handler = QuestionnaireHandler(
-            self.data_manager, 
-            self.openai_service, 
-            self.question_engine
-        )
-        
-        self.command_handlers = CommandHandlers(
-            self.data_manager,
-            self.openai_service,
-            self.question_engine
-        )
-        
-        self.callback_handlers = CallbackHandlers(
-            self.data_manager,
-            self.openai_service,
-            self.question_engine,
-            self.questionnaire_handler
-        )
-    
-    def _create_application(self):
-        """Создать приложение Telegram"""
-        self.application = Application.builder() \
-            .token(self.config.telegram_token) \
-            .build()
-        
-        # Регистрация обработчиков команд
-        self.application.add_handler(CommandHandler("start", self.command_handlers.start_command))
-        self.application.add_handler(CommandHandler("help", self.command_handlers.help_command))
-        self.application.add_handler(CommandHandler("stats", self.command_handlers.stats_command))
-        self.application.add_handler(CommandHandler("balance", self.command_handlers.balance_command))
-        self.application.add_handler(CommandHandler("restart", self.command_handlers.restart_command))
-        
-        # Регистрация обработчика callback-запросов
-        self.application.add_handler(CallbackQueryHandler(self.callback_handlers.handle_callback_query))
-        
-        # Регистрация обработчика текстовых сообщений
-        self.application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            self._handle_text_message
-        ))
-        
-        # Обработчик ошибок
-        self.application.add_error_handler(self._error_handler)
-    
-    async def _handle_text_message(self, update, context):
-        """Обработчик текстовых сообщений"""
-        # Увеличиваем счетчик сообщений
-        self.data_manager.increment_messages()
-        
-        user = update.effective_user
-        message_text = update.message.text
-        
-        # Получаем сессию
-        session = self.data_manager.get_or_create_session(
-            user_id=user.id,
-            chat_id=update.message.chat_id,
-            username=user.username,
-            first_name=user.first_name,
-            last_name=user.last_name
-        )
-        
-        session.update_activity()
-        
-        # Если пользователь находится в состоянии анкеты
-        if session.current_state in [BotState.DEMOGRAPHY, BotState.PERSONALITY, 
-                                    BotState.SKILLS, BotState.VALUES, BotState.LIMITATIONS]:
-            await self.questionnaire_handler.handle_text_message(update, session, message_text)
-        else:
-            await update.message.reply_text(
-                "Пожалуйста, используйте кнопки для навигации или команду /start",
-                parse_mode='Markdown'
-            )
-    
-    async def _error_handler(self, update, context):
-        """Обработчик ошибок"""
-        logger.error(f"Ошибка: {context.error}", exc_info=context.error)
-        
-        try:
-            if update and update.effective_chat:
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text="❌ *Произошла ошибка*\n\nПожалуйста, попробуйте начать заново /start",
-                    parse_mode='Markdown'
-                )
-        except Exception as e:
-            logger.error(f"Ошибка в обработчике ошибок: {e}")
+        logger.info(f"🤖 Бот инициализирован. Режим AI: {'Включен' if self.openai_service else 'Выключен'}")
     
     async def run(self):
-        """Запустить бота"""
+        """Запуск бота в режиме polling"""
         try:
-            # Запускаем поллинг
-            await self.application.initialize()
-            await self.application.start()
+            # Создаем Application
+            self.application = Application.builder() \
+                .token(self.config.telegram_token) \
+                .post_init(self._post_init) \
+                .post_shutdown(self._post_shutdown) \
+                .build()
             
-            logger.info("🚀 Бот запускается...")
+            # Регистрируем обработчики
+            self._setup_handlers()
             
-            # Настройки поллинга для Python 3.9 и Render
-            updater = self.application.updater
-            if updater:
-                await updater.start_polling(
-                    drop_pending_updates=True,
-                    allowed_updates=None,
-                    poll_interval=1.0,
-                    timeout=self.config.polling_timeout,
-                    connect_timeout=self.config.polling_connect_timeout,
-                    read_timeout=self.config.polling_read_timeout,
-                    write_timeout=self.config.polling_write_timeout
-                )
+            logger.info("🔄 Запуск бота в режиме polling...")
+            await self.application.run_polling(
+                allowed_updates=['message', 'callback_query'],
+                drop_pending_updates=True,
+                close_loop=False
+            )
             
-            logger.info("✅ Бот запущен и готов к работе!")
-            
-            # Бесконечный цикл
-            while True:
-                await asyncio.sleep(3600)  # Спим 1 час
-        
-        except KeyboardInterrupt:
-            logger.info("⏹ Остановка бота по запросу пользователя")
         except Exception as e:
-            logger.critical(f"❌ Критическая ошибка бота: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка при запуске бота: {e}", exc_info=True)
             raise
-        finally:
-            await self._shutdown()
     
-    async def _shutdown(self):
-        """Завершение работы бота"""
-        logger.info("🔄 Завершение работы бота...")
+    def _setup_handlers(self):
+        """Настройка обработчиков команд и сообщений"""
+        # Команды
+        self.application.add_handler(CommandHandler("start", start_command))
+        self.application.add_handler(CommandHandler("help", help_command))
+        self.application.add_handler(CommandHandler("stats", stats_command))
+        self.application.add_handler(CommandHandler("balance", balance_command))
+        self.application.add_handler(CommandHandler("restart", restart_command))
+        
+        # Callback-запросы (кнопки)
+        self.application.add_handler(CallbackQueryHandler(
+            handle_callback_query,
+            pattern="^(?!multiselect_|slider_).*"
+        ))
+        
+        # Мультиселект
+        self.application.add_handler(CallbackQueryHandler(
+            handle_multiselect,
+            pattern="^multiselect_"
+        ))
+        
+        # Слайдеры
+        self.application.add_handler(CallbackQueryHandler(
+            handle_slider,
+            pattern="^slider_"
+        ))
+        
+        # Текстовые ответы (только когда пользователь в состоянии анкеты)
+        self.application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            handle_text_answer
+        ))
+        
+        logger.info("✅ Обработчики зарегистрированы")
+    
+    async def _post_init(self, application: Application):
+        """Вызывается после инициализации бота"""
+        logger.info("✅ Бот инициализирован и готов к работе")
+        
+        # Проверяем сессии при запуске
+        active_sessions = self.data_manager.get_active_sessions_count()
+        logger.info(f"📊 Активных сессий: {active_sessions}")
+        
+        # Запускаем фоновые задачи
+        application.create_task(self.data_manager.cleanup_old_sessions())
+        
+        if self.openai_service:
+            application.create_task(self.openai_service.periodic_balance_check())
+    
+    async def _post_shutdown(self, application: Application):
+        """Вызывается перед выключением бота"""
+        logger.info("🛑 Бот выключается...")
+        
+        # Сохраняем статистику при выключении
+        self.data_manager.save_statistics()
+        logger.info("📈 Статистика сохранена")
+    
+    def get_user_session(self, user_id: int) -> Optional[UserSession]:
+        """Получить сессию пользователя"""
+        return self.data_manager.get_session(user_id)
+    
+    def save_user_session(self, session: UserSession):
+        """Сохранить сессию пользователя"""
+        self.data_manager.save_session(session)
+    
+    async def send_message(self, chat_id: int, text: str, **kwargs):
+        """Отправить сообщение пользователю"""
+        if self.application:
+            try:
+                await self.application.bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    **kwargs
+                )
+            except Exception as e:
+                logger.error(f"❌ Ошибка отправки сообщения: {e}")
+    
+    async def send_question(self, user_id: int, question_data: Dict[str, Any]):
+        """Отправить вопрос пользователю"""
+        session = self.get_user_session(user_id)
+        if session:
+            await self.question_engine.send_question(user_id, session, question_data)
+    
+    async def complete_questionnaire(self, user_id: int):
+        """Завершить анкетирование и выдать результат"""
+        session = self.get_user_session(user_id)
+        if not session:
+            return
         
         try:
-            # Сохраняем все сессии
-            for session in self.data_manager.get_all_sessions():
-                self.data_manager.save_session(session)
+            logger.info(f"📋 Завершение анкеты для пользователя {user_id}")
             
-            # Останавливаем приложение
-            if self.application:
-                if self.application.updater and self.application.updater.running:
-                    await self.application.updater.stop()
-                await self.application.stop()
-                await self.application.shutdown()
+            # Здесь будет логика анализа ответов и генерации рекомендаций
+            if self.openai_service:
+                # Используем AI для анализа
+                recommendations = await self.openai_service.generate_recommendations(session)
+                session.recommendations = recommendations
+            else:
+                # Базовые рекомендации (без AI)
+                session.recommendations = "Базовые рекомендации (режим без AI)"
             
-            logger.info("✅ Бот успешно остановлен")
+            # Обновляем состояние
+            session.current_state = BotState.IDLE
+            session.completed_at = datetime.now()
+            self.save_user_session(session)
+            
+            # Отправляем результаты
+            await self.send_message(
+                chat_id=user_id,
+                text="✅ Анкета завершена! Вот ваши персонализированные рекомендации...\n\n"
+                    f"{session.recommendations[:1000]}..."  # Ограничиваем длину
+            )
             
         except Exception as e:
-            logger.error(f"Ошибка при завершении работы: {e}")
+            logger.error(f"❌ Ошибка завершения анкеты: {e}", exc_info=True)
+            await self.send_message(
+                chat_id=user_id,
+                text="❌ Произошла ошибка при обработке ваших ответов. Попробуйте позже."
+            )
