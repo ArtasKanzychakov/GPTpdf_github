@@ -1,562 +1,380 @@
-version: "2.0"
-total_questions: 18
-questions:
-  # Часть 1: ДЕМОГРАФИЯ И БАЗА (3 вопроса)
-  - id: 1
-    part: 1
-    text: "🔢 *ВОПРОС 1/18: ВАШ ВОЗРАСТ*\n\nВыберите вашу возрастную группу:"
-    type: "buttons"
-    options:
-      - text: "18-25 лет"
-        value: "age_18-25"
-        store_field: "age_group"
-      - text: "26-35 лет"
-        value: "age_26-35"
-        store_field: "age_group"
-      - text: "36-45 лет"
-        value: "age_36-45"
-        store_field: "age_group"
-      - text: "46+ лет"
-        value: "age_46+"
-        store_field: "age_group"
-    next_question: 2
-  
-  - id: 2
-    part: 1
-    text: "🎓 *ВОПРОС 2/18: ВАШЕ ОБРАЗОВАНИЕ*\n\nВыберите ваш образовательный уровень:"
-    type: "buttons"
-    options:
-      - text: "Среднее"
-        value: "edu_school"
-        store_field: "education"
-      - text: "Среднее специальное"
-        value: "edu_college"
-        store_field: "education"
-      - text: "Неоконченное высшее"
-        value: "edu_incomplete"
-        store_field: "education"
-      - text: "Высшее (бакалавр)"
-        value: "edu_bachelor"
-        store_field: "education"
-      - text: "Высшее (магистр/специалист)"
-        value: "edu_master"
-        store_field: "education"
-      - text: "Два и более высших"
-        value: "edu_multiple"
-        store_field: "education"
-      - text: "MBA/аспирантура"
-        value: "edu_mba"
-        store_field: "education"
-      - text: "Самообразование"
-        value: "edu_self"
-        store_field: "education"
-    next_question: 3
-  
-  - id: 3
-    part: 1
-    text: "🏙️ *ВОПРОС 3/18: ВАШ ГОРОД/РЕГИОН*\n\nВыберите тип вашего населенного пункта:"
-    type: "buttons"
-    options:
-      - text: "Москва"
-        value: "loc_moscow"
-        store_field: "location_type"
-        location: "Москва"
-      - text: "Санкт-Петербург"
-        value: "loc_spb"
-        store_field: "location_type"
-        location: "Санкт-Петербург"
-      - text: "Город-миллионник"
-        value: "loc_million"
-        store_field: "location_type"
-        location: "Город-миллионник"
-      - text: "Областной центр"
-        value: "loc_region"
-        store_field: "location_type"
-        location: "Областной центр"
-      - text: "Малый город"
-        value: "loc_small"
-        store_field: "location_type"
-        location: "Малый город"
-      - text: "Село/деревня"
-        value: "loc_village"
-        store_field: "location_type"
-        location: "Село/деревня"
-      - text: "Другое (напишу)"
-        value: "loc_custom"
-        store_field: "location_type"
-        is_custom: true
-        custom_prompt: "🏙️ *ВОПРОС 3/18 (продолжение): НАЗВАНИЕ ВАШЕГО ГОРОДА*\n\nНапишите название вашего города или региона:"
-        custom_field: "location_custom"
-    next_question: 4
-  
-  - id: 4
-    part: 2
-    text: "🎯 *ВОПРОС 4/18: КЛЮЧЕВАЯ МОТИВАЦИЯ*\n\nЧто для вас ВАЖНЕЕ ВСЕГО в бизнесе?\nВыберите 2-3 самых важных пункта:"
-    type: "multiselect"
-    min_selections: 2
-    max_selections: 3
-    options:
-      - text: "Свобода и независимость"
-        value: "mot_freedom"
-        store_field: "motivations"
-      - text: "Стабильный высокий доход"
-        value: "mot_money"
-        store_field: "motivations"
-      - text: "Помощь людям"
-        value: "mot_help"
-        store_field: "motivations"
-      - text: "Творческая реализация"
-        value: "mot_creative"
-        store_field: "motivations"
-      - text: "Решение сложных вызовов"
-        value: "mot_challenge"
-        store_field: "motivations"
-      - text: "Признание, статус"
-        value: "mot_status"
-        store_field: "motivations"
-      - text: "Баланс работы и жизни"
-        value: "mot_balance"
-        store_field: "motivations"
-      - text: "Наследие, долгосрочный проект"
-        value: "mot_legacy"
-        store_field: "motivations"
-    next_question: 5
-- id: 5
-  part: 2
-  text: "🧩 *ВОПРОС 5/18: СТИЛЬ ПРИНЯТИЯ РЕШЕНИЙ*\n\n*Ситуация:* Нужно выбрать между двумя проектами.\n\nКакой подход вам ближе?"
-  type: "buttons"
-  options:
-    - text: "💖 Проект А - нравится интуитивно"
-      value: "dec_feelings"
-      store_field: "decision_style"
-    - text: "📊 Проект Б - больше цифр и аналитики"
-      value: "dec_logic"
-      store_field: "decision_style"
-    - text: "🤝 Посоветуюсь с близкими/экспертами"
-      value: "dec_advice"
-      store_field: "decision_style"
-    - text: "⚖️ Составлю таблицу плюсов/минусов"
-      value: "dec_table"
-      store_field: "decision_style"
-    - text: "🎯 Выберу то, что быстрее принесет результат"
-      value: "dec_fast"
-      store_field: "decision_style"
-  next_question: 6
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Конфигурационные настройки бота
+"""
 
-- id: 6
-  part: 2
-  text: "🎲 *ВОПРОС 6/18: ОТНОШЕНИЕ К РИСКУ*\n\n*Ситуация:* У вас есть 100,000₽ свободных денег.\n\nНа что готовы их использовать?"
-  type: "buttons"
-  options:
-    - text: "🔒 Только на проверенные инвестиции"
-      value: "risk_safe"
-      store_field: "risk_scenario"
-    - text: "🎓 На обучение/развитие навыков"
-      value: "risk_learning"
-      store_field: "risk_scenario"
-    - text: "🚀 На запуск своего дела"
-      value: "risk_business"
-      store_field: "risk_scenario"
-    - text: "🎰 На рискованный стартап"
-      value: "risk_startup"
-      store_field: "risk_scenario"
-  next_question: 7
+import os
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Union
 
-- id: 7
-  part: 2
-  text: "🎲 *ВОПРОС 6/18 (продолжение): УРОВЕНЬ РИСКА*\n\nОцените ваш общий уровень толерантности к риску:\n1 - максимальная осторожность, 10 - готов к высоким рискам"
-  type: "slider"
-  next_question: 8
+# Импортируем из enums
+from models.enums import NicheCategory, NicheDetails, QuestionType
 
-- id: 8
-  part: 2
-  text: "⚡ *ВОПРОС 7/18: ЭНЕРГЕТИЧЕСКИЙ ПРОФИЛЬ*\n\nКак распределяется ваша ЭНЕРГИЯ в течение дня?\n(1 - минимальная энергия, 7 - максимальная)\n\nНапишите три числа через пробел (утро день вечер):"
-  type: "text"
-  next_question: 9
+@dataclass
+class BotConfig:
+    """Конфигурация бота"""
 
-- id: 9
-  part: 2
-  text: "⚡ *ВОПРОС 7/18 (продолжение): ПИКОВАЯ ПРОДУКТИВНОСТЬ*\n\nКогда вы наиболее продуктивны для АНАЛИТИЧЕСКОЙ работы?"
-  type: "buttons"
-  options:
-    - text: "🌅 Утро"
-      value: "peak_analytical_morning"
-      store_field: "peak_analytical"
-    - text: "☀️ День"
-      value: "peak_analytical_day"
-      store_field: "peak_analytical"
-    - text: "🌙 Вечер"
-      value: "peak_analytical_evening"
-      store_field: "peak_analytical"
-  next_question: 10
+    # Токены и ключи
+    telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_BOT_TOKEN', ''))
+    openai_api_key: str = field(default_factory=lambda: os.getenv('OPENAI_API_KEY', ''))
 
-- id: 10
-  part: 2
-  text: "⚡ *ВОПРОС 7/18 (продолжение): ПИКОВАЯ ПРОДУКТИВНОСТЬ*\n\nКогда вы наиболее продуктивны для ТВОРЧЕСКОЙ работы?"
-  type: "buttons"
-  options:
-    - text: "🌅 Утро"
-      value: "peak_creative_morning"
-      store_field: "peak_creative"
-    - text: "☀️ День"
-      value: "peak_creative_day"
-      store_field: "peak_creative"
-    - text: "🌙 Вечер"
-      value: "peak_creative_evening"
-      store_field: "peak_creative"
-  next_question: 11
+    # Настройки сервера
+    host: str = field(default_factory=lambda: os.getenv('HOST', '0.0.0.0'))
+    port: int = field(default_factory=lambda: int(os.getenv('PORT', '10000')))
 
-- id: 11
-  part: 2
-  text: "⚡ *ВОПРОС 7/18 (продолжение): ПИКОВАЯ ПРОДУКТИВНОСТЬ*\n\nКогда вы наиболее продуктивны для ОБЩЕНИЯ С ЛЮДЬМИ?"
-  type: "buttons"
-  options:
-    - text: "🌅 Утро"
-      value: "peak_social_morning"
-      store_field: "peak_social"
-    - text: "☀️ День"
-      value: "peak_social_day"
-      store_field: "peak_social"
-    - text: "🌙 Вечер"
-      value: "peak_social_evening"
-      store_field: "peak_social"
-  next_question: 12
+    # Настройки OpenAI
+    openai_model: str = field(default_factory=lambda: os.getenv('OPENAI_MODEL', 'gpt-4-turbo-preview'))
+    openai_temperature: float = field(default_factory=lambda: float(os.getenv('OPENAI_TEMPERATURE', '0.7')))
+    openai_max_tokens: int = field(default_factory=lambda: int(os.getenv('OPENAI_MAX_TOKENS', '2000')))
 
-- id: 12
-  part: 2
-  text: "👻 *ВОПРОС 8/18: ГЛУБИННЫЕ СТРАХИ*\n\nЧего вы БОЛЬШЕ ВСЕГО БОИТЕСЬ в бизнесе?\nВыберите 1-2 главных страха:"
-  type: "multiselect"
-  min_selections: 1
-  max_selections: 2
-  options:
-    - text: "Финансовая нестабильность"
-      value: "fear_financial"
-      store_field: "fears_selected"
-    - text: "Не справиться технически"
-      value: "fear_technical"
-      store_field: "fears_selected"
-    - text: "Провал, осуждение близких"
-      value: "fear_failure"
-      store_field: "fears_selected"
-    - text: "Выгорание, потеря интереса"
-      value: "fear_burnout"
-      store_field: "fears_selected"
-    - text: "Юридические проблемы"
-      value: "fear_legal"
-      store_field: "fears_selected"
-    - text: "Не найти клиентов"
-      value: "fear_clients"
-      store_field: "fears_selected"
-    - text: "Конкуренция"
-      value: "fear_competition"
-      store_field: "fears_selected"
-  next_question: 13
+    # Настройки бота
+    bot_language: str = field(default_factory=lambda: os.getenv('BOT_LANGUAGE', 'ru'))
+    cleanup_hours: int = field(default_factory=lambda: int(os.getenv('CLEANUP_HOURS', '24')))
+    max_questions: int = field(default_factory=lambda: int(os.getenv('MAX_QUESTIONS', '35')))  # Увеличил до 35 для YAML
 
-- id: 13
-  part: 2
-  text: "👻 *ВОПРОС 8/18 (продолжение): ОПИШИТЕ ВАШ СТРАХ*\n\nА теперь опишите СВОИМИ СЛОВАМИ:\n\"Мой самый большой страх в бизнесе - это...\""
-  type: "text"
-  next_question: 14
+    # Данные вопросов
+    questions: List[Dict[str, Any]] = field(default_factory=list)
+    question_categories: Dict[str, str] = field(default_factory=dict)
+    niche_categories: List[NicheDetails] = field(default_factory=list)
 
-- id: 14
-  part: 3
-  text: "🧠 *ВОПРОС 9/18: АНАЛИТИЧЕСКИЕ НАВЫКИ*\n\nОцените ваш уровень аналитики и работы с цифрами:\n(1 - начинающий, 5 - эксперт)"
-  type: "slider"
-  next_question: 15
+    def __post_init__(self):
+        """Загрузка вопросов после инициализации"""
+        config_dir = Path(__file__).parent
+        
+        print("🔄 Загрузка конфигурации...")
+        print(f"📁 Директория: {config_dir}")
 
-- id: 15
-  part: 3
-  text: "💬 *ВОПРОС 10/18: КОММУНИКАЦИОННЫЕ НАВЫКИ*\n\nОцените ваши навыки общения и переговоров:"
-  type: "slider"
-  next_question: 16
+        # Пробуем загрузить YAML (приоритет), если не получится - JSON
+        yaml_path = config_dir / 'questions.yaml'
+        json_path = config_dir / 'questions.json'
+        
+        loaded_data = None
+        file_format = ""
+        
+        # Пробуем YAML
+        if yaml_path.exists():
+            try:
+                import yaml
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    loaded_data = yaml.safe_load(f)
+                file_format = "YAML"
+                print("✅ Файл questions.yaml найден и загружен")
+            except ImportError:
+                print("❌ PyYAML не установлен. pip install pyyaml")
+            except Exception as e:
+                print(f"❌ Ошибка загрузки YAML: {e}")
+        
+        # Если YAML не загрузился, пробуем JSON
+        if not loaded_data and json_path.exists():
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    loaded_data = json.load(f)
+                file_format = "JSON"
+                print("✅ Файл questions.json найден и загружен")
+            except Exception as e:
+                print(f"❌ Ошибка загрузки JSON: {e}")
+        
+        if not loaded_data:
+            print("❌ Не удалось загрузить ни один файл с вопросами")
+            print(f"   Ожидался один из: {yaml_path} или {json_path}")
+            # Создаем минимальный набор вопросов для теста
+            self._create_minimal_questions()
+            self._create_default_niches()
+            return
 
-- id: 16
-  part: 3
-  text: "🎨 *ВОПРОС 11/18: ТВОРЧЕСКИЕ НАВЫКИ*\n\nОцените ваши навыки дизайна и креативности:"
-  type: "slider"
-  next_question: 17
+        # Обработка загруженных данных
+        try:
+            if file_format == "YAML":
+                # Структура YAML файла
+                self.questions = loaded_data.get('questions', [])
+                self.question_categories = {}  # В YAML нет категорий
+                
+                print(f"📝 Загружено {len(self.questions)} вопросов из YAML")
+                
+                # Валидация YAML вопросов
+                for i, q in enumerate(self.questions):
+                    if 'id' not in q:
+                        q['id'] = f"q{i+1}"
+                    if 'type' not in q:
+                        q['type'] = 'text'
+                    if 'category' not in q:
+                        q['category'] = 'general'
+                        
+            else:  # JSON
+                self.questions = loaded_data.get('questions', [])
+                self.question_categories = loaded_data.get('categories', {})
+                
+                print(f"📝 Загружено {len(self.questions)} вопросов из JSON")
 
-- id: 17
-  part: 3
-  text: "📊 *ВОПРОС 12/18: ОРГАНИЗАЦИОННЫЕ НАВЫКИ*\n\nОцените ваши навыки планирования и организации:"
-  type: "slider"
-  next_question: 18
+            # Загрузка категорий ниш
+            if file_format == "JSON":
+                niche_categories_data = loaded_data.get('niche_categories', [])
+                self._load_niche_categories(niche_categories_data)
+            else:
+                # Для YAML создаем стандартные ниши
+                self._create_default_niches()
 
-- id: 18
-  part: 3
-  text: "🔧 *ВОПРОС 13/18: НАВЫКИ РУЧНОГО ТРУДА*\n\nОцените ваши навыки работы руками:"
-  type: "slider"
-  next_question: 19
+            print(f"✅ Конфигурация успешно загружена из {file_format}")
+            print(f"   📊 Всего вопросов: {len(self.questions)}")
+            print(f"   🏢 Категорий ниш: {len(self.niche_categories)}")
+            
+            # ДЕБАГ: первые 3 вопроса
+            if len(self.questions) > 0:
+                print("\n🔍 Примеры вопросов:")
+                for i, q in enumerate(self.questions[:3]):
+                    q_id = q.get('id', 'нет id')
+                    q_text = q.get('text', 'нет текста')[:60]
+                    q_type = q.get('type', 'неизвестно')
+                    print(f"   {i+1}. [{q_id}] {q_text}... (тип: {q_type})")
 
-- id: 19
-  part: 3
-  text: "❤️ *ВОПРОС 14/18: ЭМОЦИОНАЛЬНЫЙ ИНТЕЛЛЕКТ*\n\nОцените ваш эмоциональный интеллект:"
-  type: "slider"
-  next_question: 20
+        except Exception as e:
+            print(f"❌ Критическая ошибка при обработке конфигурации: {e}")
+            import traceback
+            traceback.print_exc()
+            self._create_minimal_questions()
+            self._create_default_niches()
 
-- id: 20
-  part: 3
-  text: "🌟 *ВОПРОС 15/18: ВАША СУПЕРСИЛА*\n\nЕСЛИ БЫ ВЫ БЫЛИ СУПЕРГЕРОЕМ, ваша суперсила была бы:"
-  type: "buttons"
-  options:
-    - text: "🔮 ПРЕДВИДЕНИЕ - вижу тренды"
-      value: "power_vision"
-      store_field: "superpower"
-    - text: "💬 УБЕЖДЕНИЕ - договариваюсь"
-      value: "power_persuasion"
-      store_field: "superpower"
-    - text: "🔧 ИНЖЕНЕРИЯ - решаю задачи"
-      value: "power_engineering"
-      store_field: "superpower"
-    - text: "🎨 СОЗИДАНИЕ - создаю красивое"
-      value: "power_creation"
-      store_field: "superpower"
-    - text: "👁️ ПРОНИКНОВЕНИЕ - понимаю мотивы"
-      value: "power_insight"
-      store_field: "superpower"
-    - text: "⚡ ЭНЕРГИЯ - работаю на энтузиазме"
-      value: "power_energy"
-      store_field: "superpower"
-  next_question: 21
+    def _create_minimal_questions(self):
+        """Создать минимальный набор вопросов для тестирования"""
+        print("⚠️ Создаю минимальный набор вопросов для теста")
+        self.questions = [
+            {
+                "id": "test_1",
+                "text": "Тестовый вопрос: Как вас зовут?",
+                "type": "text",
+                "category": "test"
+            },
+            {
+                "id": "test_2", 
+                "text": "Тестовый вопрос 2: Что вас интересует?",
+                "type": "text",
+                "category": "test"
+            }
+        ]
+        self.question_categories = {"test": "Тестовая категория"}
 
-- id: 21
-  part: 3
-  text: "🔄 *ВОПРОС 16/18: РЕЖИМ РАБОТЫ*\n\nКак вы ЛУЧШЕ ВСЕГО РАБОТАЕТЕ?\nВыберите вашу идеальную рабочую среду:"
-  type: "buttons"
-  options:
-    - text: "👤 В одиночку"
-      value: "work_alone"
-      store_field: "work_style"
-    - text: "👥 В паре"
-      value: "work_pair"
-      store_field: "work_style"
-    - text: "👨‍👩‍👧‍👦 В команде 3-5 человек"
-      value: "work_team"
-      store_field: "work_style"
-    - text: "🏢 В структуре с ролями"
-      value: "work_structure"
-      store_field: "work_style"
-    - text: "🌐 Удаленно"
-      value: "work_remote"
-      store_field: "work_style"
-    - text: "🤸 Гибко - меняю форматы"
-      value: "work_flexible"
-      store_field: "work_style"
-  next_question: 22
+    def _create_default_niches(self):
+        """Создать стандартные категории ниш"""
+        print("📦 Создаю стандартные категории ниш...")
+        
+        # Маппинг id из файла на enum значения
+        category_map = {
+            "QUICK_START": NicheCategory.QUICK_START,
+            "BALANCED": NicheCategory.BALANCED,
+            "LONG_TERM": NicheCategory.LONG_TERM,
+            "RISKY": NicheCategory.RISKY,
+            "HIDDEN": NicheCategory.HIDDEN
+        }
+        
+        # Стандартные ниши
+        default_niches_data = [
+            {
+                "id": "QUICK_START",
+                "name": "Быстрый старт",
+                "category": "QUICK_START",
+                "description": "Проекты с быстрой окупаемостью, низким порогом входа",
+                "emoji": "🔥",
+                "risk_level": 4,
+                "time_to_profit": "1-3 месяца",
+                "required_skills": ["Маркетинг", "Коммуникация", "Быстрое обучение"],
+                "min_budget": 50000,
+                "success_rate": 0.6,
+                "examples": ["Дропшиппинг", "Консультации", "Фриланс"]
+            },
+            {
+                "id": "BALANCED",
+                "name": "Сбалансированный",
+                "category": "BALANCED",
+                "description": "Оптимальное соотношение риска и доходности",
+                "emoji": "🚀",
+                "risk_level": 3,
+                "time_to_profit": "3-6 месяцев",
+                "required_skills": ["Планирование", "Управление проектами"],
+                "min_budget": 150000,
+                "success_rate": 0.7,
+                "examples": ["Интернет-магазин", "SMM-агентство", "Курсы"]
+            },
+            {
+                "id": "LONG_TERM",
+                "name": "Долгосрочный",
+                "category": "LONG_TERM",
+                "description": "Стабильный бизнес с постепенным ростом",
+                "emoji": "🌱",
+                "risk_level": 2,
+                "time_to_profit": "6-12 месяцев",
+                "required_skills": ["Стратегическое мышление", "Терпение"],
+                "min_budget": 300000,
+                "success_rate": 0.8,
+                "examples": ["Собственный продукт", "Франшиза", "Консалтинг"]
+            },
+            {
+                "id": "RISKY",
+                "name": "Рискованный",
+                "category": "RISKY",
+                "description": "Высокий риск, но и высокий потенциальный доход",
+                "emoji": "💎",
+                "risk_level": 5,
+                "time_to_profit": "1-3 месяца (или провал)",
+                "required_skills": ["Анализ рисков", "Быстрое принятие решений"],
+                "min_budget": 500000,
+                "success_rate": 0.4,
+                "examples": ["Стартапы", "Криптовалютные проекты", "Венчурные проекты"]
+            },
+            {
+                "id": "HIDDEN",
+                "name": "Скрытая ниша",
+                "category": "HIDDEN",
+                "description": "Уникальные ниши с низкой конкуренцией",
+                "emoji": "🎯",
+                "risk_level": 3,
+                "time_to_profit": "2-4 месяца",
+                "required_skills": ["Креативное мышление", "Исследование рынка"],
+                "min_budget": 100000,
+                "success_rate": 0.65,
+                "examples": ["Нишевые курсы", "Специализированные SaaS", "Услуги для узкой аудитории"]
+            }
+        ]
+        
+        self.niche_categories = []
+        for niche_data in default_niches_data:
+            try:
+                niche_enum = category_map.get(niche_data['category'])
+                if not niche_enum:
+                    continue
+                    
+                niche_details = NicheDetails(
+                    id=niche_data['id'],
+                    name=niche_data['name'],
+                    category=niche_enum,
+                    description=niche_data['description'],
+                    emoji=niche_data['emoji'],
+                    risk_level=niche_data['risk_level'],
+                    time_to_profit=niche_data['time_to_profit'],
+                    required_skills=niche_data['required_skills'],
+                    min_budget=niche_data['min_budget'],
+                    success_rate=niche_data['success_rate'],
+                    examples=niche_data['examples']
+                )
+                self.niche_categories.append(niche_details)
+                
+            except Exception as e:
+                print(f"⚠️ Ошибка создания ниши {niche_data.get('id')}: {e}")
+        
+        print(f"✅ Создано {len(self.niche_categories)} стандартных ниш")
 
-- id: 22
-  part: 3
-  text: "📚 *ВОПРОС 17/18: СТИЛЬ ОБУЧЕНИЯ*\n\nКак вы лучше всего учитесь новому?\nОпишите одним-двумя предложениями:"
-  type: "text"
-  next_question: 23
+    def _load_niche_categories(self, niche_categories_data):
+        """Загрузить категории ниш из данных"""
+        self.niche_categories = []
+        
+        if not niche_categories_data:
+            self._create_default_niches()
+            return
+            
+        for category_data in niche_categories_data:
+            try:
+                category_id = category_data.get('category')
+                if not category_id:
+                    continue
+                    
+                # Ищем соответствующий Enum
+                niche_enum = None
+                for enum_item in NicheCategory:
+                    if enum_item.name == category_id:
+                        niche_enum = enum_item
+                        break
+                
+                if not niche_enum:
+                    print(f"⚠️ Категория '{category_id}' не найдена в NicheCategory Enum")
+                    continue
 
-- id: 23
-  part: 4
-  text: "🌍 *ВОПРОС 18/18: ЭКЗИСТЕНЦИАЛЬНЫЙ ВОПРОС*\n\n*Задание на 2 минуты размышления:*\n\n\"Если бы вам не нужно было зарабатывать деньги и все базовые потребности были бы удовлетворены...\"\n\nЧЕМ БЫ ВЫ ЗАНИМАЛИСЬ?\n(опишите подробно, 3-5 предложений)"
-  type: "text"
-  next_question: 24
+                # Создаем объект NicheDetails
+                niche_details = NicheDetails(
+                    id=category_data.get('id', category_id),
+                    name=category_data.get('name', category_id),
+                    category=niche_enum,
+                    description=category_data.get('description', ''),
+                    emoji=category_data.get('emoji', '📊'),
+                    risk_level=category_data.get('risk_level', 3),
+                    time_to_profit=category_data.get('time_to_profit', ''),
+                    required_skills=category_data.get('required_skills', []),
+                    min_budget=category_data.get('min_budget', 0),
+                    success_rate=category_data.get('success_rate', 0.5),
+                    examples=category_data.get('examples', [])
+                )
 
-- id: 24
-  part: 4
-  text: "⏳ *ВОПРОС 18/18 (продолжение): СОСТОЯНИЕ ПОТОКА*\n\nВспомните момент, когда вы полностью погружались в дело и теряли чувство времени:\n\nКакое это было дело? Опишите одним предложением."
-  type: "text"
-  next_question: 25
+                self.niche_categories.append(niche_details)
 
-- id: 25
-  part: 4
-  text: "⏳ *ВОПРОС 18/18 (продолжение): ОЩУЩЕНИЯ В ПОТОКЕ*\n\nТеперь опишите свои ОЩУЩЕНИЯ в тот момент:\n\"Я чувствовал(а)...\" (2-3 предложения)"
-  type: "text"
-  next_question: 26
+            except Exception as e:
+                print(f"⚠️ Ошибка загрузки категории: {e}")
 
-- id: 26
-  part: 4
-  text: "👥 *ВОПРОС 18/18 (продолжение): ИДЕАЛЬНЫЙ КЛИЕНТ*\n\nОпишите человека, с которым вам было бы ИНТЕРЕСНО и ПРИЯТНО работать:\n\nВыберите возрастную группу:"
-  type: "buttons"
-  options:
-    - text: "20-30 лет"
-      value: "client_20-30"
-      store_field: "ideal_client_age"
-    - text: "30-40 лет"
-      value: "client_30-40"
-      store_field: "ideal_client_age"
-    - text: "40-50 лет"
-      value: "client_40-50"
-      store_field: "ideal_client_age"
-    - text: "50+ лет"
-      value: "client_50+"
-      store_field: "ideal_client_age"
-  next_question: 27
+    def validate(self) -> bool:
+        """Проверка корректности конфигурации"""
+        errors = []
 
-- id: 27
-  part: 4
-  text: "👥 *ВОПРОС 18/18 (продолжение): СФЕРА ДЕЯТЕЛЬНОСТИ КЛИЕНТА*\n\nВыберите сферу деятельности вашего идеального клиента:"
-  type: "buttons"
-  options:
-    - text: "💻 IT/Технологии"
-      value: "field_it"
-      store_field: "ideal_client_field"
-    - text: "🎨 Творчество/Дизайн"
-      value: "field_creative"
-      store_field: "ideal_client_field"
-    - text: "💼 Бизнес/Предпринимательство"
-      value: "field_business"
-      store_field: "ideal_client_field"
-    - text: "📚 Образование"
-      value: "field_education"
-      store_field: "ideal_client_field"
-    - text: "🏥 Здоровье/Красота"
-      value: "field_health"
-      store_field: "ideal_client_field"
-    - text: "🌿 Другое"
-      value: "field_other"
-      store_field: "ideal_client_field"
-  next_question: 28
+        if not self.telegram_token:
+            errors.append("TELEGRAM_BOT_TOKEN не установлен")
 
-- id: 28
-  part: 4
-  text: "👥 *ВОПРОС 18/18 (продолжение): ГЛАВНАЯ \"БОЛЬ\" КЛИЕНТА*\n\nКакая главная \"боль\" у вашего идеального клиента?"
-  type: "buttons"
-  options:
-    - text: "⏰ Не хватает времени"
-      value: "pain_time"
-      store_field: "ideal_client_pain"
-    - text: "📊 Нет системности"
-      value: "pain_system"
-      store_field: "ideal_client_pain"
-    - text: "🎓 Нет экспертизы"
-      value: "pain_expertise"
-      store_field: "ideal_client_pain"
-    - text: "👥 Нет клиентов"
-      value: "pain_clients"
-      store_field: "ideal_client_pain"
-    - text: "💰 Не хватает денег"
-      value: "pain_money"
-      store_field: "ideal_client_pain"
-  next_question: 29
+        if len(self.questions) == 0:
+            errors.append("Не загружены вопросы анкеты")
+        elif len(self.questions) < 3:
+            errors.append(f"Слишком мало вопросов: {len(self.questions)}")
 
-- id: 29
-  part: 4
-  text: "👥 *ВОПРОС 18/18 (продолжение): ДЕТАЛИ О КЛИЕНТЕ*\n\nДобавьте деталей одним-двумя предложениями:\n\"Мне нравится работать с людьми, которые...\""
-  type: "text"
-  next_question: 30
+        if errors:
+            print("❌ Ошибки конфигурации:")
+            for error in errors:
+                print(f"   - {error}")
+            return False
 
-- id: 30
-  part: 5
-  text: "🛠️ *ВОПРОС 18/18 (продолжение): РЕСУРСНАЯ КАРТА*\n\nЧто у вас уже есть для старта?\n\n1. ДЕНЬГИ для инвестиций:"
-  type: "buttons"
-  options:
-    - text: "< 50,000₽"
-      value: "budget_50k"
-      store_field: "budget"
-    - text: "50,000-200,000₽"
-      value: "budget_200k"
-      store_field: "budget"
-    - text: "200,000-500,000₽"
-      value: "budget_500k"
-      store_field: "budget"
-    - text: "> 500,000₽"
-      value: "budget_more"
-      store_field: "budget"
-  next_question: 31
+        print("✅ Конфигурация прошла проверку")
+        return True
 
-- id: 31
-  part: 5
-  text: "🛠️ *ВОПРОС 18/18 (продолжение): ОБОРУДОВАНИЕ*\n\nКакое оборудование у вас уже есть?\n(можно выбрать несколько)"
-  type: "multiselect"
-  min_selections: 0
-  max_selections: 4
-  options:
-    - text: "💻 Компьютер/ноутбук"
-      value: "equip_computer"
-      store_field: "equipment"
-    - text: "📷 Камера/фотоаппарат"
-      value: "equip_camera"
-      store_field: "equipment"
-    - text: "🔧 Специнструменты"
-      value: "equip_tools"
-      store_field: "equipment"
-    - text: "🏠 Помещение/мастерская"
-      value: "equip_space"
-      store_field: "equipment"
-  next_question: 32
+    def get_question_by_id(self, question_id: str) -> Optional[Dict[str, Any]]:
+        """Получить вопрос по ID"""
+        for question in self.questions:
+            if question.get('id') == question_id:
+                return question
+        return None
 
-- id: 32
-  part: 5
-  text: "🛠️ *ВОПРОС 18/18 (продолжение): ЗНАНИЯ И ДОСТУП*\n\nКакие нематериальные активы у вас есть?\n(можно выбрать несколько)"
-  type: "multiselect"
-  min_selections: 0
-  max_selections: 4
-  options:
-    - text: "🤝 Профессиональные связи"
-      value: "know_connections"
-      store_field: "knowledge_assets"
-    - text: "🎓 Уникальная экспертиза"
-      value: "know_expertise"
-      store_field: "knowledge_assets"
-    - text: "📊 Доступ к информации"
-      value: "know_info"
-      store_field: "knowledge_assets"
-    - text: "🌟 Личный бренд/аудитория"
-      value: "know_brand"
-      store_field: "knowledge_assets"
-  next_question: 33
+    def get_question_by_index(self, index: int) -> Optional[Dict[str, Any]]:
+        """Получить вопрос по индексу"""
+        if 0 <= index < len(self.questions):
+            return self.questions[index]
+        return None
 
-- id: 33
-  part: 5
-  text: "⏰ *ВОПРОС 18/18 (продолжение): ВРЕМЕННОЙ БЮДЖЕТ*\n\nСколько часов в неделю вы реально можете уделить бизнесу на старте?"
-  type: "buttons"
-  options:
-    - text: "5-10 часов"
-      value: "time_5-10"
-      store_field: "time_per_week"
-    - text: "10-20 часов"
-      value: "time_10-20"
-      store_field: "time_per_week"
-    - text: "20-30 часов"
-      value: "time_20-30"
-      store_field: "time_per_week"
-    - text: "30-40 часов"
-      value: "time_30-40"
-      store_field: "time_per_week"
-    - text: "40+ часов"
-      value: "time_40+"
-      store_field: "time_per_week"
-  next_question: 34
+    def get_total_questions(self) -> int:
+        """Получить общее количество вопросов"""
+        return len(self.questions)
 
-- id: 34
-  part: 5
-  text: "📍 *ВОПРОС 18/18 (продолжение): МАСШТАБ БИЗНЕСА*\n\nКакой масштаб бизнеса вас привлекает?"
-  type: "buttons"
-  options:
-    - text: "📍 Локальный (район/город)"
-      value: "scale_local"
-      store_field: "business_scale"
-    - text: "🗺️ Региональный (область)"
-      value: "scale_region"
-      store_field: "business_scale"
-    - text: "🇷🇺 Национальный (Россия)"
-      value: "scale_national"
-      store_field: "business_scale"
-    - text: "🌍 Международный"
-      value: "scale_international"
-      store_field: "business_scale"
-    - text: "🌐 Онлайн-глобальный"
-      value: "scale_online"
-      store_field: "business_scale"
-  next_question: 35
+    def get_niche_by_id(self, niche_id: str) -> Optional[NicheDetails]:
+        """Получить детали ниши по ID"""
+        for niche in self.niche_categories:
+            if niche.id == niche_id:
+                return niche
+        return None
 
-- id: 35
-  part: 5
-  text: "📍 *ВОПРОС 18/18 (продолжение): ФОРМАТ РАБОТЫ*\n\nКакие у вас предпочтения по формату работы?"
-  type: "buttons"
-  options:
-    - text: "🌐 Только онлайн"
-      value: "format_online"
-      store_field: "business_format"
-    - text: "🏪 Только офлайн"
-      value: "format_offline"
-      store_field: "business_format"
-    - text: "🔄 Гибрид"
-      value: "format_hybrid"
-      store_field: "business_format"
-  next_question: null  # Последний вопрос
+    def get_niche_by_enum(self, niche_enum: NicheCategory) -> Optional[NicheDetails]:
+        """Получить детали ниши по Enum значению"""
+        for niche in self.niche_categories:
+            if niche.category == niche_enum:
+                return niche
+        return None
+
+# Создаем глобальный экземпляр конфигурации
+print("🚀 Инициализация конфигурации бота...")
+try:
+    config = BotConfig()
+    if config.validate():
+        print("✨ Конфигурация готова к работе!")
+    else:
+        print("⚠️ Конфигурация имеет ошибки, но бот попытается запуститься")
+except Exception as e:
+    print(f"💥 Критическая ошибка при инициализации конфигурации: {e}")
+    import traceback
+    traceback.print_exc()
+    # Создаем пустую конфигурацию для возможности запуска
+    config = BotConfig()
+    config.questions = []
+    config.niche_categories = []
