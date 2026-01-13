@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from models.enums import NicheCategory
+from models.session import NicheDetails  # Новый импорт
 
 @dataclass
 class BotConfig:
@@ -37,7 +38,7 @@ class BotConfig:
     # Данные вопросов
     questions: List[Dict[str, Any]] = field(default_factory=list)
     question_categories: Dict[str, str] = field(default_factory=dict)
-    niche_categories: List[NicheCategory] = field(default_factory=list)
+    niche_categories: List[NicheDetails] = field(default_factory=list)  # Теперь NicheDetails вместо NicheCategory
     
     def __post_init__(self):
         """Загрузка вопросов после инициализации"""
@@ -88,19 +89,42 @@ class BotConfig:
             self.questions = data.get('questions', [])
             self.question_categories = data.get('categories', {})
             
-            # Преобразуем категории ниш в enum
+            # ИСПРАВЛЕННАЯ ЧАСТЬ: Загрузка ниш с использованием NicheCategory Enum
             niche_categories_data = data.get('niche_categories', [])
             self.niche_categories = []
             
             for category_data in niche_categories_data:
                 try:
-                    category = NicheCategory(
-                        id=category_data['id'],
-                        name=category_data['name'],
+                    category_id = category_data['id']
+                    
+                    # Ищем соответствующий Enum
+                    niche_enum = None
+                    for enum_item in NicheCategory:
+                        if enum_item.name == category_id:
+                            niche_enum = enum_item
+                            break
+                    
+                    if not niche_enum:
+                        print(f"⚠️ Категория '{category_id}' не найдена в NicheCategory Enum")
+                        print(f"   Доступные значения: {[e.name for e in NicheCategory]}")
+                        continue
+                    
+                    # Создаем объект NicheDetails
+                    niche_details = NicheDetails(
+                        id=category_id,
+                        name=category_data.get('name', category_id),
+                        category=niche_enum,  # Это Enum значение
                         description=category_data.get('description', ''),
-                        emoji=category_data.get('emoji', '📊')
+                        emoji=category_data.get('emoji', '📊'),
+                        risk_level=category_data.get('risk_level', 3),
+                        time_to_profit=category_data.get('time_to_profit', ''),
+                        required_skills=category_data.get('required_skills', []),
+                        min_budget=category_data.get('min_budget', 0),
+                        success_rate=category_data.get('success_rate', 0.5)
                     )
-                    self.niche_categories.append(category)
+                    
+                    self.niche_categories.append(niche_details)
+                    
                 except (KeyError, ValueError) as e:
                     print(f"⚠️ Ошибка загрузки категории: {e}")
                     print(f"   Данные категории: {category_data}")
@@ -123,8 +147,10 @@ class BotConfig:
             # ДЕБАГ: выводим информацию о категориях ниш
             if len(self.niche_categories) > 0:
                 print(f"\n🏢 Категории ниш ({len(self.niche_categories)}):")
-                for i, category in enumerate(self.niche_categories[:5]):
-                    print(f"   {i+1}. {category.emoji} {category.name} ({category.id})")
+                for i, niche in enumerate(self.niche_categories[:5]):
+                    print(f"   {i+1}. {niche.emoji} {niche.name} ({niche.category.value})")
+                    if niche.description:
+                        print(f"      Описание: {niche.description[:60]}...")
                 if len(self.niche_categories) > 5:
                     print(f"   ... и ещё {len(self.niche_categories) - 5}")
             else:
@@ -132,11 +158,6 @@ class BotConfig:
                 
         except json.JSONDecodeError as e:
             print(f"❌ Ошибка парсинга JSON: {e}")
-            print(f"   Проверьте синтаксис файла {questions_path}")
-            self.questions = []
-            self.niche_categories = []
-        except yaml.YAMLError as e:
-            print(f"❌ Ошибка парсинга YAML: {e}")
             print(f"   Проверьте синтаксис файла {questions_path}")
             self.questions = []
             self.niche_categories = []
@@ -180,12 +201,19 @@ class BotConfig:
         """Получить название категории по ID"""
         return self.question_categories.get(category_id, f"Категория {category_id}")
     
-    def get_niche_category_by_id(self, category_id: str) -> Optional[NicheCategory]:
-        """Получить категорию ниши по ID"""
-        for category in self.niche_categories:
-            if category.id == category_id:
-                return category
-        print(f"⚠️ Категория ниши с ID '{category_id}' не найдена")
+    def get_niche_by_id(self, niche_id: str) -> Optional[NicheDetails]:
+        """Получить детали ниши по ID"""
+        for niche in self.niche_categories:
+            if niche.id == niche_id:
+                return niche
+        print(f"⚠️ Ниша с ID '{niche_id}' не найдена")
+        return None
+    
+    def get_niche_by_enum(self, niche_enum: NicheCategory) -> Optional[NicheDetails]:
+        """Получить детали ниши по Enum значению"""
+        for niche in self.niche_categories:
+            if niche.category == niche_enum:
+                return niche
         return None
     
     def get_question_by_index(self, index: int) -> Optional[Dict[str, Any]]:
@@ -197,10 +225,25 @@ class BotConfig:
     def get_total_questions(self) -> int:
         """Получить общее количество вопросов"""
         return len(self.questions)
+    
+    def get_niche_categories_for_user(self, user_skills: List[str], user_risk_tolerance: int) -> List[NicheDetails]:
+        """Получить подходящие ниши для пользователя на основе навыков и толерантности к риску"""
+        suitable_niches = []
+        
+        for niche in self.niche_categories:
+            # Фильтрация по риску
+            if abs(niche.risk_level - user_risk_tolerance) <= 2:
+                suitable_niches.append(niche)
+        
+        # Сортировка по соответствию навыкам (если есть информация о требуемых навыках)
+        if suitable_niches and hasattr(suitable_niches[0], 'required_skills'):
+            suitable_niches.sort(
+                key=lambda n: len(set(n.required_skills) & set(user_skills)),
+                reverse=True
+            )
+        
+        return suitable_niches
 
 # Создаем глобальный экземпляр конфигурации
-# Этот импорт должен быть в конце, чтобы избежать циклических зависимостей
-# Если нужно использовать config в других модулях, импортируйте его так:
-# from config.settings import config
 print("🔄 Инициализация конфигурации бота...")
 config = BotConfig()
