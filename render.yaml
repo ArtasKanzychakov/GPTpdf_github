@@ -1,19 +1,14 @@
-# render.yaml (если используете)
 services:
   - type: web
-    name: telegram-business-bot
-    env: python
-    region: frankfurt
+    name: business-navigator-bot
+    runtime: docker
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: PORT
-        value: "10000"
+        value: 10000
     healthCheckPath: /health
-    healthCheckTimeout: 180
-    autoDeploy: true
