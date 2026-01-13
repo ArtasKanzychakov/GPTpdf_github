@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 БИЗНЕС-НАВИГАТОР v7.0: Глубокий психологический анализ для поиска уникальных ниш
-Полная версия с OpenAI, polling и всеми улучшениями
+Полная версия для Python 3.9.16 с OpenAI 0.28.1
 """
 
 import os
@@ -41,8 +41,9 @@ from telegram.ext import (
     PicklePersistence,
 )
 
+# Импорт для OpenAI 0.28.1 (совместим с Python 3.9)
 import openai
-from openai import AsyncOpenAI
+from openai.error import OpenAIError, AuthenticationError, RateLimitError, APIError, ServiceUnavailableError
 
 # ==================== НАСТРОЙКА ЛОГИРОВАНИЯ ====================
 logging.basicConfig(
@@ -69,7 +70,6 @@ class BotState(Enum):
     DETAILED_PLAN = auto()
     PSYCH_ANALYSIS = auto()
     SAVING_DATA = auto()
-    FEEDBACK = auto()
 
 class QuestionType(Enum):
     """Типы вопросов"""
@@ -87,157 +87,8 @@ class NicheCategory(Enum):
     LONG_TERM = "🌱 ДОЛГОСРОЧНЫЙ"
     RISKY = "💎 РИСКОВАННЫЙ"
     HIDDEN = "🎯 СКРЫТАЯ НИША"
-    LOCAL = "📍 ЛОКАЛЬНЫЙ"
-    ONLINE = "🌐 ОНЛАЙН"
 
 # ==================== МОДЕЛИ ДАННЫХ ====================
-@dataclass
-class EnergyProfile:
-    """Энергетический профиль"""
-    morning: int = 3  # 1-7
-    day: int = 3      # 1-7
-    evening: int = 3  # 1-7
-    peak_analytical: Optional[str] = None
-    peak_creative: Optional[str] = None
-    peak_social: Optional[str] = None
-
-@dataclass
-class SkillsProfile:
-    """Профиль навыков"""
-    analytics: int = 3  # 1-5
-    communication: int = 3
-    design: int = 3
-    organization: int = 3
-    manual: int = 3
-    emotional_iq: int = 3
-    superpower: Optional[str] = None
-    work_style: Optional[str] = None
-    learning_preferences: Dict[str, int] = field(default_factory=dict)
-
-@dataclass
-class Demographics:
-    """Демографические данные"""
-    age_group: Optional[str] = None
-    education: Optional[str] = None
-    location_type: Optional[str] = None
-    location_custom: Optional[str] = None
-    location: Optional[str] = None  # Комбинированное
-    
-    def get_full_location(self):
-        """Получить полную локацию"""
-        if self.location_custom:
-            return self.location_custom
-        return self.location_type or "Не указано"
-
-@dataclass
-class PersonalityProfile:
-    """Профиль личности"""
-    motivations: List[str] = field(default_factory=list)
-    decision_style: Optional[str] = None
-    risk_tolerance: int = 5  # 1-10
-    risk_scenario: Optional[str] = None
-    energy_profile: EnergyProfile = field(default_factory=EnergyProfile)
-    fears_selected: List[str] = field(default_factory=list)
-    fear_custom: Optional[str] = None
-
-@dataclass
-class ValuesProfile:
-    """Ценности и интересы"""
-    existential_answer: Optional[str] = None
-    flow_experience_type: Optional[str] = None
-    flow_experience_desc: Optional[str] = None
-    flow_feelings: Optional[str] = None
-    ideal_client_age: Optional[str] = None
-    ideal_client_field: Optional[str] = None
-    ideal_client_pain: Optional[str] = None
-    ideal_client_details: Optional[str] = None
-
-@dataclass
-class LimitationsProfile:
-    """Ограничения и ресурсы"""
-    budget: Optional[str] = None
-    equipment: List[str] = field(default_factory=list)
-    equipment_custom: Optional[str] = None
-    knowledge_assets: List[str] = field(default_factory=list)
-    time_per_week: Optional[str] = None
-    business_scale: Optional[str] = None
-    business_format: Optional[str] = None
-
-@dataclass
-class BusinessNiche:
-    """Бизнес-ниша"""
-    id: int
-    category: str
-    name: str
-    description: str
-    why_suitable: str
-    format: str
-    investment_range: str
-    roi_timeframe: str
-    steps: List[str]
-    risks: List[str]
-    age_specific: Optional[str] = None
-    location_specific: Optional[str] = None
-    education_utilization: Optional[str] = None
-    
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "category": self.category,
-            "name": self.name,
-            "description": self.description,
-            "why_suitable": self.why_suitable,
-            "format": self.format,
-            "investment_range": self.investment_range,
-            "roi_timeframe": self.roi_timeframe,
-            "steps": self.steps,
-            "risks": self.risks
-        }
-
-@dataclass
-class DetailedPlan:
-    """Детальный план"""
-    niche_id: int
-    niche_name: str
-    psychological_prep: str
-    day_by_day_launch: str
-    financial_roadmap: str
-    success_metrics: str
-    common_mistakes: str
-    resources: str
-    age_adapted: str
-    location_adapted: str
-    
-    def to_dict(self):
-        return {
-            "niche_id": self.niche_id,
-            "niche_name": self.niche_name,
-            "psychological_prep": self.psychological_prep,
-            "day_by_day_launch": self.day_by_day_launch,
-            "financial_roadmap": self.financial_roadmap,
-            "success_metrics": self.success_metrics,
-            "common_mistakes": self.common_mistakes,
-            "resources": self.resources
-        }
-
-@dataclass
-class PsychologicalAnalysis:
-    """Психологический анализ"""
-    demographic_insights: str
-    personality_profile: str
-    hidden_potential: str
-    ideal_conditions: str
-    age_specific_recommendations: str
-    location_opportunities: str
-    
-    def to_dict(self):
-        return {
-            "demographic_insights": self.demographic_insights,
-            "personality_profile": self.personality_profile,
-            "hidden_potential": self.hidden_potential,
-            "ideal_conditions": self.ideal_conditions
-        }
-
 @dataclass
 class UserSession:
     """Сессия пользователя"""
@@ -247,30 +98,72 @@ class UserSession:
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     
-    # Данные профиля
-    demographics: Demographics = field(default_factory=Demographics)
-    personality: PersonalityProfile = field(default_factory=PersonalityProfile)
-    skills: SkillsProfile = field(default_factory=SkillsProfile)
-    values: ValuesProfile = field(default_factory=ValuesProfile)
-    limitations: LimitationsProfile = field(default_factory=LimitationsProfile)
+    # Часть 1: Демография (3 вопроса)
+    age_group: Optional[str] = None
+    education: Optional[str] = None
+    location_type: Optional[str] = None
+    location_custom: Optional[str] = None
+    location: Optional[str] = None
+    
+    # Часть 2: Личность и мотивация (5 вопросов)
+    motivations: List[str] = field(default_factory=list)
+    decision_style: Optional[str] = None
+    risk_tolerance: int = 5
+    risk_scenario: Optional[str] = None
+    energy_morning: int = 3
+    energy_day: int = 3
+    energy_evening: int = 3
+    peak_analytical: Optional[str] = None
+    peak_creative: Optional[str] = None
+    peak_social: Optional[str] = None
+    fears_selected: List[str] = field(default_factory=list)
+    fear_custom: Optional[str] = None
+    
+    # Часть 3: Способности и навыки (4 вопроса)
+    skills_analytics: int = 3
+    skills_communication: int = 3
+    skills_design: int = 3
+    skills_organization: int = 3
+    skills_manual: int = 3
+    skills_eq: int = 3
+    superpower: Optional[str] = None
+    work_style: Optional[str] = None
+    learning_preferences: str = ""
+    
+    # Часть 4: Ценности и интересы (3 вопроса)
+    existential_answer: Optional[str] = None
+    flow_experience_desc: Optional[str] = None
+    flow_feelings: Optional[str] = None
+    ideal_client_age: Optional[str] = None
+    ideal_client_field: Optional[str] = None
+    ideal_client_pain: Optional[str] = None
+    ideal_client_details: Optional[str] = None
+    
+    # Часть 5: Практические ограничения (3 вопроса)
+    budget: Optional[str] = None
+    equipment: List[str] = field(default_factory=list)
+    knowledge_assets: List[str] = field(default_factory=list)
+    time_per_week: Optional[str] = None
+    business_scale: Optional[str] = None
+    business_format: Optional[str] = None
     
     # AI результаты
-    psychological_analysis: Optional[PsychologicalAnalysis] = None
-    generated_niches: List[BusinessNiche] = field(default_factory=list)
-    detailed_plans: Dict[int, DetailedPlan] = field(default_factory=dict)
+    psychological_analysis: Optional[str] = None
+    generated_niches: List[Dict] = field(default_factory=list)
+    detailed_plans: Dict[str, str] = field(default_factory=dict)
+    selected_niche_index: int = 0
     
-    # Текущее состояние
+    # Состояние
     current_state: BotState = BotState.START
     current_question: int = 0
     questions_answered: int = 0
-    total_questions: int = 23
+    total_questions: int = 18
     start_time: datetime = field(default_factory=datetime.now)
     last_activity: datetime = field(default_factory=datetime.now)
     
     # Временные данные
     temp_multiselect: List[str] = field(default_factory=list)
-    temp_ratings: Dict[str, int] = field(default_factory=dict)
-    temp_learning_prefs: Dict[str, int] = field(default_factory=dict)
+    temp_energy_selection: Optional[str] = None
     
     def update_activity(self):
         """Обновить время последней активности"""
@@ -283,66 +176,69 @@ class UserSession:
     def get_progress_bar(self) -> str:
         """Получить строку прогресса"""
         percent = self.get_progress_percentage()
-        filled = int(percent / 5)  # 20 символов
+        filled = int(percent / 5)
         bar = "🟩" * filled + "⬜" * (20 - filled)
         return f"{bar} {percent:.1f}%"
     
-    def to_openai_profile(self) -> Dict[str, Any]:
-        """Конвертировать в формат для OpenAI"""
+    def get_location(self) -> str:
+        """Получить полную локацию"""
+        if self.location_custom:
+            return self.location_custom
+        return self.location_type or "Не указано"
+    
+    def to_openai_dict(self) -> Dict[str, Any]:
+        """Конвертировать в словарь для OpenAI"""
         return {
             "demographics": {
-                "age_group": self.demographics.age_group,
-                "education": self.demographics.education,
-                "location": self.demographics.get_full_location()
+                "age_group": self.age_group,
+                "education": self.education,
+                "location": self.get_location()
             },
             "personality": {
-                "motivations": self.personality.motivations,
-                "decision_style": self.personality.decision_style,
-                "risk_tolerance": self.personality.risk_tolerance,
-                "risk_scenario": self.personality.risk_scenario,
+                "motivations": self.motivations,
+                "decision_style": self.decision_style,
+                "risk_tolerance": self.risk_tolerance,
+                "risk_scenario": self.risk_scenario,
                 "energy_profile": {
-                    "morning": self.personality.energy_profile.morning,
-                    "day": self.personality.energy_profile.day,
-                    "evening": self.personality.energy_profile.evening,
-                    "peak_analytical": self.personality.energy_profile.peak_analytical,
-                    "peak_creative": self.personality.energy_profile.peak_creative,
-                    "peak_social": self.personality.energy_profile.peak_social
+                    "morning": self.energy_morning,
+                    "day": self.energy_day,
+                    "evening": self.energy_evening,
+                    "peak_analytical": self.peak_analytical,
+                    "peak_creative": self.peak_creative,
+                    "peak_social": self.peak_social
                 },
-                "fears": self.personality.fears_selected,
-                "fear_custom": self.personality.fear_custom
+                "fears": self.fears_selected,
+                "fear_custom": self.fear_custom
             },
             "skills": {
-                "analytics": self.skills.analytics,
-                "communication": self.skills.communication,
-                "design": self.skills.design,
-                "organization": self.skills.organization,
-                "manual": self.skills.manual,
-                "emotional_iq": self.skills.emotional_iq,
-                "superpower": self.skills.superpower,
-                "work_style": self.skills.work_style,
-                "learning_preferences": self.skills.learning_preferences
+                "analytics": self.skills_analytics,
+                "communication": self.skills_communication,
+                "design": self.skills_design,
+                "organization": self.skills_organization,
+                "manual": self.skills_manual,
+                "emotional_iq": self.skills_eq,
+                "superpower": self.superpower,
+                "work_style": self.work_style,
+                "learning_preferences": self.learning_preferences
             },
             "values": {
-                "existential_answer": self.values.existential_answer,
-                "flow_experience": {
-                    "type": self.values.flow_experience_type,
-                    "description": self.values.flow_experience_desc,
-                    "feelings": self.values.flow_feelings
-                },
+                "existential_answer": self.existential_answer,
+                "flow_experience": self.flow_experience_desc,
+                "flow_feelings": self.flow_feelings,
                 "ideal_client": {
-                    "age": self.values.ideal_client_age,
-                    "field": self.values.ideal_client_field,
-                    "pain": self.values.ideal_client_pain,
-                    "details": self.values.ideal_client_details
+                    "age": self.ideal_client_age,
+                    "field": self.ideal_client_field,
+                    "pain": self.ideal_client_pain,
+                    "details": self.ideal_client_details
                 }
             },
             "limitations": {
-                "budget": self.limitations.budget,
-                "equipment": self.limitations.equipment,
-                "knowledge_assets": self.limitations.knowledge_assets,
-                "time_per_week": self.limitations.time_per_week,
-                "business_scale": self.limitations.business_scale,
-                "business_format": self.limitations.business_format
+                "budget": self.budget,
+                "equipment": self.equipment,
+                "knowledge_assets": self.knowledge_assets,
+                "time_per_week": self.time_per_week,
+                "business_scale": self.business_scale,
+                "business_format": self.business_format
             }
         }
 
@@ -357,36 +253,34 @@ class OpenAIUsage:
     failed_requests: int = 0
     estimated_cost_usd: float = 0.0
     
-    def add_usage(self, prompt_tokens: int, completion_tokens: int, cost_usd: float = 0.0):
+    def add_usage(self, usage: Dict):
         """Добавить использование"""
-        self.total_tokens += prompt_tokens + completion_tokens
-        self.prompt_tokens += prompt_tokens
-        self.completion_tokens += completion_tokens
+        self.total_tokens += usage.get("total_tokens", 0)
+        self.prompt_tokens += usage.get("prompt_tokens", 0)
+        self.completion_tokens += usage.get("completion_tokens", 0)
         self.total_requests += 1
         self.successful_requests += 1
-        self.estimated_cost_usd += cost_usd
+        
+        # Примерная стоимость (gpt-3.5-turbo)
+        # Входные: $0.0015 / 1K, Выходные: $0.002 / 1K
+        prompt_cost = (self.prompt_tokens * 0.0015) / 1000
+        completion_cost = (self.completion_tokens * 0.002) / 1000
+        self.estimated_cost_usd = prompt_cost + completion_cost
     
     def add_failure(self):
         """Добавить неудачный запрос"""
         self.total_requests += 1
         self.failed_requests += 1
     
-    def get_cost_per_request(self) -> float:
-        """Средняя стоимость запроса"""
-        if self.successful_requests == 0:
-            return 0.0
-        return self.estimated_cost_usd / self.successful_requests
-    
     def get_stats_str(self) -> str:
         """Статистика в строке"""
         success_rate = (self.successful_requests / self.total_requests * 100) if self.total_requests > 0 else 0
         return (
-            f"📊 Статистика OpenAI:\n"
+            f"📊 *Статистика OpenAI:*\n"
             f"• Запросов: {self.total_requests}\n"
             f"• Успешных: {self.successful_requests} ({success_rate:.1f}%)\n"
             f"• Токенов: {self.total_tokens:,}\n"
-            f"• Стоимость: ${self.estimated_cost_usd:.4f}\n"
-            f"• Средний запрос: ${self.get_cost_per_request():.6f}"
+            f"• Стоимость: ${self.estimated_cost_usd:.4f}"
         )
 
 @dataclass
@@ -410,7 +304,7 @@ class BotStatistics:
     def get_stats_str(self) -> str:
         """Статистика в строке"""
         return (
-            f"🤖 Статистика бота:\n"
+            f"🤖 *Статистика бота:*\n"
             f"• Пользователей: {self.total_users}\n"
             f"• Активных: {self.active_sessions}\n"
             f"• Завершено: {self.completed_profiles}\n"
@@ -419,127 +313,6 @@ class BotStatistics:
             f"• Сообщений: {self.total_messages}\n"
             f"• Работает: {self.get_uptime()}"
         )
-
-class BotDataManager:
-    """Менеджер данных бота"""
-    
-    def __init__(self):
-        self.user_sessions: Dict[int, UserSession] = {}
-        self.openai_usage = OpenAIUsage()
-        self.stats = BotStatistics()
-        self.cache_dir = Path("./cache")
-        self.cache_dir.mkdir(exist_ok=True)
-        
-        # Кэш для быстрого доступа
-        self.user_cache = {}
-        self.last_cleanup = datetime.now()
-        
-    def get_or_create_session(self, user_id: int, chat_id: int, **kwargs) -> UserSession:
-        """Получить или создать сессию"""
-        if user_id not in self.user_sessions:
-            session = UserSession(
-                user_id=user_id,
-                chat_id=chat_id,
-                username=kwargs.get('username'),
-                first_name=kwargs.get('first_name'),
-                last_name=kwargs.get('last_name')
-            )
-            self.user_sessions[user_id] = session
-            self.stats.total_users += 1
-            self.stats.active_sessions += 1
-        else:
-            session = self.user_sessions[user_id]
-            session.update_activity()
-        
-        return session
-    
-    def save_session(self, user_id: int):
-        """Сохранить сессию"""
-        if user_id in self.user_sessions:
-            session = self.user_sessions[user_id]
-            cache_file = self.cache_dir / f"user_{user_id}.json"
-            try:
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    json.dump({
-                        "session": asdict(session),
-                        "last_activity": session.last_activity.isoformat()
-                    }, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                logger.error(f"Ошибка сохранения сессии {user_id}: {e}")
-    
-    def load_session(self, user_id: int) -> Optional[UserSession]:
-        """Загрузить сессию"""
-        cache_file = self.cache_dir / f"user_{user_id}.json"
-        if cache_file.exists():
-            try:
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                # Восстанавливаем сессию
-                session_data = data["session"]
-                session = UserSession(**session_data)
-                
-                # Восстанавливаем вложенные объекты
-                if 'demographics' in session_data:
-                    session.demographics = Demographics(**session_data['demographics'])
-                if 'personality' in session_data:
-                    personality_data = session_data['personality']
-                    energy_data = personality_data.get('energy_profile', {})
-                    session.personality = PersonalityProfile(
-                        motivations=personality_data.get('motivations', []),
-                        decision_style=personality_data.get('decision_style'),
-                        risk_tolerance=personality_data.get('risk_tolerance', 5),
-                        risk_scenario=personality_data.get('risk_scenario'),
-                        energy_profile=EnergyProfile(**energy_data),
-                        fears_selected=personality_data.get('fears_selected', []),
-                        fear_custom=personality_data.get('fear_custom')
-                    )
-                
-                self.user_sessions[user_id] = session
-                return session
-            except Exception as e:
-                logger.error(f"Ошибка загрузки сессии {user_id}: {e}")
-        
-        return None
-    
-    def cleanup_old_sessions(self, max_age_hours: int = 24):
-        """Очистить старые сессии"""
-        now = datetime.now()
-        if (now - self.last_cleanup).total_seconds() < 3600:  # Раз в час
-            return
-        
-        expired = []
-        for user_id, session in self.user_sessions.items():
-            if (now - session.last_activity).total_seconds() > max_age_hours * 3600:
-                expired.append(user_id)
-        
-        for user_id in expired:
-            self.save_session(user_id)
-            del self.user_sessions[user_id]
-            self.stats.active_sessions -= 1
-        
-        if expired:
-            logger.info(f"Очищено {len(expired)} неактивных сессий")
-        
-        self.last_cleanup = now
-    
-    def mark_profile_completed(self, user_id: int):
-        """Пометить профиль как завершенный"""
-        if user_id in self.user_sessions:
-            self.stats.completed_profiles += 1
-            self.save_session(user_id)
-    
-    def add_generated_niches(self, niches_count: int):
-        """Добавить сгенерированные ниши"""
-        self.stats.generated_niches += niches_count
-    
-    def add_generated_plan(self):
-        """Добавить сгенерированный план"""
-        self.stats.generated_plans += 1
-    
-    def increment_messages(self):
-        """Увеличить счетчик сообщений"""
-        self.stats.total_messages += 1
 
 # ==================== КОНФИГУРАЦИЯ ====================
 class BotConfig:
@@ -557,9 +330,12 @@ class BotConfig:
         
         if not self.openai_api_key:
             logger.warning("⚠️ OPENAI_API_KEY не найден. AI функции отключены.")
+        else:
+            # Настройка OpenAI для версии 0.28.1
+            openai.api_key = self.openai_api_key
         
         # Настройки OpenAI
-        self.openai_model = "gpt-3.5-turbo-1106"  # Дешевле и достаточно
+        self.openai_model = "gpt-3.5-turbo"
         self.openai_max_tokens = 4000
         self.openai_temperature = 0.7
         
@@ -568,8 +344,8 @@ class BotConfig:
         self.max_plans_to_generate = 3
         
         # Время ожидания
-        self.question_timeout = 300  # 5 минут
-        self.analysis_timeout = 120  # 2 минуты на анализ
+        self.question_timeout = 300
+        self.analysis_timeout = 120
         
         # Пути
         self.data_dir = Path("./data")
@@ -594,323 +370,335 @@ class BotConfig:
             "Захватывающе! Чем больше узнаю, тем интереснее становится 🎢"
         ]
         
-        # Эмодзи для прогресса
-        self.progress_emojis = ["🔴", "🟠", "🟡", "🟢", "🔵", "🟣", "🟤", "⚫", "⚪"]
-        
         logger.info(f"✅ Конфигурация загружена. OpenAI: {'Доступен' if self.openai_api_key else 'Недоступен'}")
 
-# ==================== OPENAI СЕРВИС ====================
+# ==================== OPENAI СЕРВИС (версия 0.28.1) ====================
 class OpenAIService:
-    """Сервис для работы с OpenAI"""
+    """Сервис для работы с OpenAI (версия 0.28.1)"""
     
-    def __init__(self, config: BotConfig, data_manager: BotDataManager):
+    def __init__(self, config: BotConfig):
         self.config = config
-        self.data_manager = data_manager
-        self.client = None
-        self.is_available = False
+        self.is_available = bool(config.openai_api_key)
         
-        if config.openai_api_key:
-            try:
-                self.client = AsyncOpenAI(api_key=config.openai_api_key)
-                self.is_available = True
-                logger.info("✅ OpenAI клиент инициализирован")
-            except Exception as e:
-                logger.error(f"❌ Ошибка инициализации OpenAI: {e}")
-                self.is_available = False
+        if self.is_available:
+            openai.api_key = config.openai_api_key
+            logger.info("✅ OpenAI клиент инициализирован (v0.28.1)")
         else:
             logger.warning("⚠️ OpenAI API ключ не установлен")
     
-    async def _call_openai(self, messages: List[Dict], max_tokens: int = None, temperature: float = None) -> Optional[Dict]:
-        """Вызов OpenAI API"""
-        if not self.is_available or not self.client:
+    async def _call_openai(self, prompt: str, max_tokens: int = None, temperature: float = None) -> Optional[str]:
+        """Вызов OpenAI API для версии 0.28.1"""
+        if not self.is_available:
             logger.warning("OpenAI недоступен")
             return None
         
         try:
-            response = await self.client.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model=self.config.openai_model,
-                messages=messages,
+                messages=[
+                    {"role": "system", "content": "Ты - опытный бизнес-консультант и психолог."},
+                    {"role": "user", "content": prompt}
+                ],
                 max_tokens=max_tokens or self.config.openai_max_tokens,
                 temperature=temperature or self.config.openai_temperature,
-                timeout=60.0
+                timeout=60
             )
             
-            # Логируем использование
-            usage = response.usage
-            total_tokens = usage.total_tokens
-            prompt_tokens = usage.prompt_tokens
-            completion_tokens = usage.completion_tokens
+            content = response.choices[0].message.content
             
-            # Примерная стоимость (gpt-3.5-turbo)
-            # Входные токены: $0.0010 / 1K токенов
-            # Выходные токены: $0.0020 / 1K токенов
-            cost = (prompt_tokens * 0.001 + completion_tokens * 0.002) / 1000
+            # Логируем использование токенов
+            usage = response.usage.to_dict()
+            logger.info(f"✅ OpenAI: использовано {usage.get('total_tokens', 0)} токенов")
             
-            self.data_manager.openai_usage.add_usage(prompt_tokens, completion_tokens, cost)
+            return content
             
-            logger.info(f"✅ OpenAI: использовано {total_tokens} токенов (стоимость: ${cost:.6f})")
-            
-            return {
-                "content": response.choices[0].message.content,
-                "tokens": total_tokens,
-                "cost": cost
-            }
-            
+        except AuthenticationError:
+            logger.error("❌ Ошибка аутентификации OpenAI. Проверьте API ключ.")
+            self.is_available = False
+            return None
+        except RateLimitError:
+            logger.error("❌ Превышен лимит запросов к OpenAI")
+            return None
+        except APIError as e:
+            logger.error(f"❌ Ошибка API OpenAI: {e}")
+            return None
+        except ServiceUnavailableError:
+            logger.error("❌ Сервис OpenAI временно недоступен")
+            return None
         except Exception as e:
-            self.data_manager.openai_usage.add_failure()
             logger.error(f"❌ Ошибка вызова OpenAI: {e}")
             return None
     
-    def _create_system_prompt(self, role: str = "business_psychologist") -> str:
-        """Создать системный промпт"""
-        prompts = {
-            "business_psychologist": (
-                "Ты - нейропсихолог и бизнес-стратег с 20-летним опытом. "
-                "Твоя задача - проводить глубокий психологический анализ и создавать персонализированные бизнес-стратегии. "
-                "Будь конкретным, практичным и структурированным в ответах. "
-                "Учитывай возраст, образование и локацию пользователя. "
-                "Предлагай реалистичные решения с учетом ограничений. "
-                "Используй русский язык для ответов."
-            ),
-            "niche_generator": (
-                "Ты - опытный бизнес-аналитик и предприниматель. "
-                "Твоя задача - создавать уникальные бизнес-ниши на основе психологического профиля. "
-                "Предлагай конкретные, реалистичные идеи с четкими шагами запуска. "
-                "Учитывай бюджет, временные ограничения и географию пользователя. "
-                "Будь креативным, но практичным. "
-                "Используй русский язык для ответов."
-            ),
-            "plan_creator": (
-                "Ты - бизнес-консультант и коуч с опытом запуска 50+ бизнесов. "
-                "Твоя задача - создавать гиперперсонализированные бизнес-планы. "
-                "Учитывай все особенности пользователя: возраст, страхи, навыки, ограничения. "
-                "Создавай детальные пошаговые планы с конкретными действиями и сроками. "
-                "Предусматривай риски и способы их минимизации. "
-                "Используй русский язык для ответов."
-            )
-        }
-        
-        return prompts.get(role, prompts["business_psychologist"])
-    
-    async def generate_psychological_analysis(self, session: UserSession) -> Optional[PsychologicalAnalysis]:
+    async def generate_psychological_analysis(self, session: UserSession) -> Optional[str]:
         """Генерация психологического анализа"""
         logger.info(f"🧠 Генерация психологического анализа для {session.user_id}")
         
-        profile = session.to_openai_profile()
+        profile = session.to_openai_dict()
         
-        prompt = f"""Проведи МНОГОУРОВНЕВЫЙ ПСИХОЛОГИЧЕСКИЙ АНАЛИЗ на основе данных пользователя:
+        prompt = f"""Ты - нейропсихолог и бизнес-стратег с 20-летним опытом. 
+Проведи ГЛУБОКИЙ ПСИХОЛОГИЧЕСКИЙ АНАЛИЗ и составь бизнес-стратегию.
 
-## ДЕМОГРАФИЯ:
-• Возраст: {profile['demographics']['age_group']}
-• Образование: {profile['demographics']['education']}
-• Локация: {profile['demographics']['location']}
+## ПОЛНЫЙ ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:
 
-## ПСИХОЛОГИЧЕСКИЙ ПОРТРЕТ:
-• Мотивация: {', '.join(profile['personality']['motivations'])}
-• Стиль решений: {profile['personality']['decision_style']}
-• Риск: {profile['personality']['risk_tolerance']}/10 ({profile['personality']['risk_scenario']})
-• Энергия: Утро={profile['personality']['energy_profile']['morning']}/7, День={profile['personality']['energy_profile']['day']}/7, Вечер={profile['personality']['energy_profile']['evening']}/7
-• Пиковая продуктивность: Аналитика={profile['personality']['energy_profile']['peak_analytical']}, Креатив={profile['personality']['energy_profile']['peak_creative']}, Общение={profile['personality']['energy_profile']['peak_social']}
-• Страхи: {', '.join(profile['personality']['fears'])} + "{profile['personality']['fear_custom']}"
+### 1. ДЕМОГРАФИЯ:
+- Возрастная группа: {profile['demographics']['age_group']}
+- Образование: {profile['demographics']['education']}
+- Локация: {profile['demographics']['location']}
 
-## НАВЫКИ (1-5):
-• Аналитика: {profile['skills']['analytics']}
-• Коммуникация: {profile['skills']['communication']}
-• Дизайн: {profile['skills']['design']}
-• Организация: {profile['skills']['organization']}
-• Ручной труд: {profile['skills']['manual']}
-• Эмоциональный интеллект: {profile['skills']['emotional_iq']}
-• Суперсила: {profile['skills']['superpower']}
-• Стиль работы: {profile['skills']['work_style']}
+### 2. ПСИХОЛОГИЧЕСКИЙ ПОРТРЕТ:
+- Ключевая мотивация: {', '.join(profile['personality']['motivations'])}
+- Стиль принятия решений: {profile['personality']['decision_style']}
+- Толерантность к риску: {profile['personality']['risk_tolerance']}/10 (сценарий: {profile['personality']['risk_scenario']})
+- Энергетический профиль: Утро={profile['personality']['energy_profile']['morning']}/7, День={profile['personality']['energy_profile']['day']}/7, Вечер={profile['personality']['energy_profile']['evening']}/7
+- Пиковая продуктивность: Аналитика={profile['personality']['energy_profile']['peak_analytical']}, Креатив={profile['personality']['energy_profile']['peak_creative']}, Общение={profile['personality']['energy_profile']['peak_social']}
+- Глубинные страхи: {', '.join(profile['personality']['fears'])} + "{profile['personality']['fear_custom']}"
 
-## ЦЕННОСТИ:
-• Экзистенциальный ответ: "{profile['values']['existential_answer'][:200]}..."
-• Состояние потока: {profile['values']['flow_experience']['type']} - "{profile['values']['flow_experience']['feelings']}"
-• Идеальный клиент: {profile['values']['ideal_client']['age']}, {profile['values']['ideal_client']['field']}, боль: {profile['values']['ideal_client']['pain']}
+### 3. НАВЫКИ (оценка 1-5):
+- Аналитика/логика: {profile['skills']['analytics']}/5
+- Коммуникация/переговоры: {profile['skills']['communication']}/5
+- Дизайн/креатив: {profile['skills']['design']}/5
+- Организация/планирование: {profile['skills']['organization']}/5
+- Ручной труд/мастерство: {profile['skills']['manual']}/5
+- Эмоциональный интеллект: {profile['skills']['emotional_iq']}/5
+- Суперсила: {profile['skills']['superpower']}
+- Стиль работы: {profile['skills']['work_style']}
 
-## ОГРАНИЧЕНИЯ:
-• Бюджет: {profile['limitations']['budget']}
-• Время: {profile['limitations']['time_per_week']}
-• Оборудование: {', '.join(profile['limitations']['equipment'])}
-• Масштаб: {profile['limitations']['business_scale']}
-• Формат: {profile['limitations']['business_format']}
+### 4. ЦЕННОСТИ И ИНТЕРЕСЫ:
+- Экзистенциальный ответ: "{profile['values']['existential_answer'][:200]}..."
+- Состояние потока: "{profile['values']['flow_experience']}" (ощущения: "{profile['values']['flow_feelings']}")
+- Идеальный клиент: {profile['values']['ideal_client']['age']}, сфера: {profile['values']['ideal_client']['field']}, боль: {profile['values']['ideal_client']['pain']}, детали: "{profile['values']['ideal_client']['details']}"
 
----
+### 5. ПРАКТИЧЕСКИЕ ОГРАНИЧЕНИЯ:
+- Стартовый бюджет: {profile['limitations']['budget']}
+- Оборудование: {', '.join(profile['limitations']['equipment'])}
+- Знания/активы: {', '.join(profile['limitations']['knowledge_assets'])}
+- Время в неделю: {profile['limitations']['time_per_week']}
+- Масштаб бизнеса: {profile['limitations']['business_scale']}
+- Формат работы: {profile['limitations']['business_format']}
 
 ## АНАЛИТИЧЕСКОЕ ЗАДАНИЕ:
 
-### 1. ДЕМОГРАФИЧЕСКИЕ ВОЗМОЖНОСТИ
-Проанализируй возрастные преимущества и ограничения, использование образования, географические возможности.
+### 1. ПСИХОЛОГИЧЕСКИЙ ПОРТРЕТ (детально):
+- Основные черты характера и мышления
+- Сильные стороны (как их монетизировать)
+- Слабые стороны (как компенсировать)
+- Когнитивные стили и предпочтения
 
-### 2. ПСИХОЛОГИЧЕСКИЙ ПОРТРЕТ
-Опиши основные черты характера, сильные и слабые стороны, когнитивные стили.
+### 2. СКРЫТЫЙ ПОТЕНЦИАЛ:
+- Неиспользованные комбинации навыков
+- Уникальные инсайты из экзистенциального ответа
+- Что человек умеет, но не ценит
+- Неочевидные возможности из профиля
 
-### 3. СКРЫТЫЙ ПОТЕНЦИАЛ
-Какие неиспользованные комбинации навыков есть? Что человек умеет, но не ценит?
+### 3. ИДЕАЛЬНЫЕ УСЛОВИЯ ДЛЯ БИЗНЕСА:
+- Оптимальный формат работы (онлайн/офлайн/гибрид)
+- Темп роста (быстрый/умеренный/постепенный)
+- Тип клиентов/проектов (детально)
+- Рабочее расписание (с учетом энергетического профиля)
 
-### 4. ИДЕАЛЬНЫЕ УСЛОВИЯ ДЛЯ СТАРТА
-Какой формат работы, темп роста, тип клиентов оптимальны?
+### 4. ОСОБЫЕ ВОЗМОЖНОСТИ (с учетом демографии):
+- Возрастные преимущества/ограничения
+- Как использовать образование и опыт
+- Возможности локации (географические ниши)
+- Учет временных и финансовых ограничений
 
-### 5. ВОЗРАСТНЫЕ ОСОБЕННОСТИ
-Какие стратегии подходят для этого возраста?
+ВЕРНИ СТРУКТУРИРОВАННЫЙ ОТВЕТ БЕЗ ОБЩИХ ФРАЗ. Будь конкретным и практичным."""
 
-### 6. ЛОКАЛЬНЫЕ ВОЗМОЖНОСТИ
-Какие возможности дает эта локация?
-
-Верни структурированный ответ в формате JSON:
-{{
-  "demographic_insights": "текст",
-  "personality_profile": "текст", 
-  "hidden_potential": "текст",
-  "ideal_conditions": "текст",
-  "age_specific_recommendations": "текст",
-  "location_opportunities": "текст"
-}}"""
-
-        messages = [
-            {"role": "system", "content": self._create_system_prompt("business_psychologist")},
-            {"role": "user", "content": prompt}
-        ]
+        analysis = await self._call_openai(prompt, max_tokens=3000, temperature=0.5)
         
-        response = await self._call_openai(messages, max_tokens=3000, temperature=0.5)
+        if analysis:
+            logger.info(f"✅ Психологический анализ сгенерирован ({len(analysis)} символов)")
+        else:
+            logger.warning("❌ Не удалось сгенерировать анализ")
+            analysis = self._create_fallback_analysis(session)
         
-        if response:
-            try:
-                content = response["content"]
-                # Пытаемся извлечь JSON
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    analysis_data = json.loads(json_match.group())
-                    analysis = PsychologicalAnalysis(**analysis_data)
-                    return analysis
-                else:
-                    # Если не JSON, создаем структурированный анализ
-                    analysis = PsychologicalAnalysis(
-                        demographic_insights=content[:500],
-                        personality_profile=content[500:1000] if len(content) > 500 else "",
-                        hidden_potential=content[1000:1500] if len(content) > 1000 else "",
-                        ideal_conditions=content[1500:2000] if len(content) > 1500 else "",
-                        age_specific_recommendations="",
-                        location_opportunities=""
-                    )
-                    return analysis
-            except Exception as e:
-                logger.error(f"Ошибка парсинга анализа: {e}")
-                return None
-        
-        return None
+        return analysis
     
-    async def generate_business_niches(self, session: UserSession, analysis: PsychologicalAnalysis) -> List[BusinessNiche]:
+    async def generate_business_niches(self, session: UserSession, analysis: str) -> List[Dict]:
         """Генерация бизнес-ниш"""
         logger.info(f"🎯 Генерация бизнес-ниш для {session.user_id}")
         
-        profile = session.to_openai_profile()
+        profile = session.to_openai_dict()
+        location = profile['demographics']['location']
         
-        prompt = f"""На основе психологического анализа создай 8 КОНКРЕТНЫХ БИЗНЕС-НИШ:
+        prompt = f"""Ты - бизнес-аналитик и предприниматель с опытом создания 50+ бизнесов.
+На основе психологического анализа создай 8 КОНКРЕТНЫХ БИЗНЕС-НИШ.
 
-## ПСИХОЛОГИЧЕСКИЙ АНАЛИЗ:
-{analysis.personality_profile[:1000]}
+## ПСИХОЛОГИЧЕСКИЙ АНАЛИЗ ПОЛЬЗОВАТЕЛЯ:
+{analysis[:2000]}
 
-## ДЕМОГРАФИЯ:
-• Возраст: {profile['demographics']['age_group']}
-• Образование: {profile['demographics']['education']} 
-• Локация: {profile['demographics']['location']}
-• Бюджет: {profile['limitations']['budget']}
-• Время: {profile['limitations']['time_per_week']}
-• Масштаб: {profile['limitations']['business_scale']}
-• Формат: {profile['limitations']['business_format']}
+## ПРАКТИЧЕСКИЕ ПАРАМЕТРЫ ПОЛЬЗОВАТЕЛЯ:
+- Возраст: {profile['demographics']['age_group']}
+- Образование: {profile['demographics']['education']}
+- Локация: {location}
+- Бюджет: {profile['limitations']['budget']}
+- Время: {profile['limitations']['time_per_week']}
+- Масштаб: {profile['limitations']['business_scale']}
+- Формат: {profile['limitations']['business_format']}
 
 ## ТРЕБОВАНИЯ К НИШАМ:
 
 ### 1-2. 🔥 БЫСТРЫЙ СТАРТ (первые деньги за 1-2 месяца)
-• Минимальные вложения
-• Быстрый запуск
-• Реальный рынок в локации пользователя
+- Минимальные вложения
+- Быстрый запуск
+- Конкретные первые шаги
+- Реальный рынок в локации пользователя
 
 ### 3-4. 🚀 СБАЛАНСИРОВАННЫЙ (стабильный доход за 3-6 месяцев)
-• Умеренные вложения
-• Стабильная клиентская база
-• Возможность совмещения с работой
+- Умеренные вложения
+- Стабильная клиентская база
+- Возможность совмещения с работой
+- Четкий план масштабирования
 
 ### 5-6. 🌱 ДОЛГОСРОЧНЫЙ (масштабирование за 1-2 года)
-• Серьезные перспективы роста
-• Высокий потолок доходов
-• Возможность создания бренда
+- Серьезные перспективы роста
+- Высокий потолок доходов
+- Возможность создания команды/бренда
+- Учет трендов рынка
 
 ### 7. 💎 РИСКОВАННАЯ НИША (высокая маржа, требует смелости)
-• Высокий потенциал доходности
-• Соответствие уровню риска пользователя ({profile['personality']['risk_tolerance']}/10)
-• Четкий план минимизации рисков
+- Высокий потенциал доходности
+- Соответствие уровню риска пользователя ({profile['personality']['risk_tolerance']}/10)
+- Четкий план минимизации рисков
+- Уникальное предложение
 
 ### 8. 🎯 СКРЫТАЯ НИША (мало конкурентов, требует экспертизы)
-• Использование уникальных навыков пользователя
-• Неочевидная монетизация
-• Низкая конкуренция
+- Использование уникальных навыков пользователя
+- Неочевидная монетизация
+- Низкая конкуренция
+- Требует глубокой экспертизы
 
-## ФОРМАТ ДЛЯ КАЖДОЙ НИШИ:
+## ФОРМАТ ДЛЯ КАЖДОЙ НИШИ (строго придерживайся):
 
-НИША [1-8]: [ТИП]
+НИША 1: [ТИП]
 НАЗВАНИЕ: [Краткое название, 3-5 слов]
 СУТЬ: [Что конкретно делать, 2-3 предложения]
-ПОЧЕМУ ПОДХОДИТ: [Связь с профилем, 1 предложение]
+ПОЧЕМУ ПОДХОДИТ: [Связь с профилем пользователя, 1 предложение]
 ФОРМАТ: [онлайн/офлайн/гибрид]
 ИНВЕСТИЦИИ: [Диапазон в рублях]
 СРОК ОКУПАЕМОСТИ: [Реалистичный срок]
-РИСКИ: [3 главных риска, через запятую]
 ПЕРВЫЕ 3 ШАГА: 
 1. [Конкретное действие]
-2. [Конкретное действие] 
+2. [Конкретное действие]
 3. [Конкретное действие]
 
-Верни ТОЛЬКО 8 ниш в этом формате. Каждая ниша начинается с "НИША X:"."""
+ВЕРНИ ТОЛЬКО 8 НИШ В ЭТОМ ФОРМАТЕ. Без вступлений, без заключений."""
 
-        messages = [
-            {"role": "system", "content": self._create_system_prompt("niche_generator")},
-            {"role": "user", "content": prompt}
-        ]
+        niches_text = await self._call_openai(prompt, max_tokens=4000, temperature=0.8)
         
-        response = await self._call_openai(messages, max_tokens=4000, temperature=0.8)
+        if not niches_text:
+            logger.warning("❌ Не удалось сгенерировать ниши")
+            return self._create_fallback_niches(session)
         
-        niches = []
+        # Парсинг сгенерированных ниш
+        niches = self._parse_niches_from_text(niches_text)
         
-        if response:
-            content = response["content"]
-            niches = self._parse_niches_from_text(content, session)
-        
-        # Если не удалось сгенерировать или мало ниш, добавляем запасные
-        if len(niches) < 5:
-            niches.extend(self._create_fallback_niches(session))
-        
-        # Ограничиваем количество
-        niches = niches[:self.config.max_niches_to_generate]
-        
-        self.data_manager.add_generated_niches(len(niches))
-        logger.info(f"✅ Сгенерировано {len(niches)} ниш для {session.user_id}")
+        if niches:
+            logger.info(f"✅ Сгенерировано {len(niches)} ниш")
+        else:
+            logger.warning("❌ Не удалось распарсить ниши")
+            niches = self._create_fallback_niches(session)
         
         return niches
     
-    def _parse_niches_from_text(self, text: str, session: UserSession) -> List[BusinessNiche]:
+    async def generate_detailed_plan(self, session: UserSession, niche: Dict) -> Optional[str]:
+        """Генерация детального плана"""
+        logger.info(f"📋 Генерация плана для ниши: {niche.get('name', '')}")
+        
+        profile = session.to_openai_dict()
+        
+        prompt = f"""Ты - опытный бизнес-консультант и коуч.
+Создай ГИПЕРПЕРСОНАЛИЗИРОВАННЫЙ БИЗНЕС-ПЛАН.
+
+## НИША ДЛЯ РАЗРАБОТКИ:
+{niche.get('name', '')} ({niche.get('type', '')})
+{niche.get('description', '')}
+
+## ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (ключевые параметры):
+- Возраст: {profile['demographics']['age_group']}
+- Образование: {profile['demographics']['education']}
+- Локация: {profile['demographics']['location']}
+- Мотивация: {', '.join(profile['personality']['motivations'])}
+- Главные страхи: {', '.join(profile['personality']['fears'])}
+- Бюджет: {profile['limitations']['budget']}
+- Время в неделю: {profile['limitations']['time_per_week']}
+- Суперсила: {profile['skills']['superpower']}
+- Энергетический пик: Аналитика={profile['personality']['energy_profile']['peak_analytical']}, Креатив={profile['personality']['energy_profile']['peak_creative']}
+
+## ОСОБЫЕ ТРЕБОВАНИЯ:
+1. УЧЕСТЬ ВОЗРАСТ {profile['demographics']['age_group']} - предложить соответствующий темп и сложность
+2. ИСПОЛЬЗОВАТЬ ОБРАЗОВАНИЕ {profile['demographics']['education']} - интегрировать в бизнес-модель
+3. УЧЕСТЬ ЛОКАЦИЮ {profile['demographics']['location']} - предложить местные возможности
+4. ОБОЙТИ СТРАХИ: {', '.join(profile['personality']['fears'])} - добавить психологические техники
+5. УЛОЖИТЬСЯ В {profile['limitations']['time_per_week']} ЧАСОВ В НЕДЕЛЮ - реалистичное расписание
+6. ИСПОЛЬЗОВАТЬ СУПЕРСИЛУ {profile['skills']['superpower']} - сделать конкурентным преимуществом
+
+## СТРУКТУРА ПЛАНА:
+
+### 1. 🧠 ПСИХОЛОГИЧЕСКАЯ ПОДГОТОВКА (день 1-7)
+- Ментальная настройка для этой ниши
+- Ежедневные ритуалы и привычки
+- Техники работы со страхами
+- Подготовка окружения
+
+### 2. 🚀 ПОШАГОВЫЙ ЗАПУСК (30 дней, по дням)
+#### Неделя 1: Подготовка (конкретные действия по дням)
+#### Неделя 2: Создание активов (сайт, соцсети, материалы)
+#### Неделя 3: Первые контакты и тестовые продажи
+#### Неделя 4: Анализ результатов и корректировка
+
+### 3. 💰 ФИНАНСОВАЯ ДОРОЖНАЯ КАРТА (12 месяцев)
+#### Месяц 1-3: Выход в ноль (конкретные цифры доходов/расходов)
+#### Месяц 4-6: Доход 50,000₽ в месяц (как достичь, конкретные шаги)
+#### Месяц 7-12: Доход 100,000₽ в месяц (стратегия масштабирования)
+#### Инвестиции по месяцам (детально)
+
+### 4. 📊 МЕТРИКИ УСПЕХА И KPI
+- Ежедневные метрики (3 конкретных показателя)
+- Еженедельные метрики (3 показателя)
+- Ежемесячные метрики (3 показателя)
+- Критические точки контроля
+
+### 5. ⚠️ ЧЕК-ЛИСТ ОШИБОК И РЕШЕНИЙ
+- Типичные ошибки новичков в этой нише (5-7 ошибок)
+- Как распознать их заранее
+- Конкретные решения для каждой ошибки
+- План Б на случай серьезных проблем
+
+### 6. 📚 РЕСУРСЫ ДЛЯ РОСТА И РАЗВИТИЯ
+- Книги (конкретные названия, почему подходят)
+- Курсы (конкретные, с ссылками если возможно)
+- Сообщества и нетворкинг (где искать)
+- Инструменты и софт (список с описанием)
+
+Сделай план МАКСИМАЛЬНО КОНКРЕТНЫМ, с цифрами, сроками, конкретными действиями.
+Учитывай все особенности пользователя из профиля."""
+
+        plan = await self._call_openai(prompt, max_tokens=4000, temperature=0.6)
+        
+        if not plan:
+            logger.warning("❌ Не удалось сгенерировать план")
+            plan = self._create_fallback_plan(session, niche)
+        
+        return plan
+    
+    def _parse_niches_from_text(self, text: str) -> List[Dict]:
         """Парсинг ниш из текста OpenAI"""
         niches = []
         current_niche = {}
+        
         lines = text.strip().split('\n')
         
         for line in lines:
             line = line.strip()
             
-            if line.startswith('НИША') and ':' in line:
+            if line.startswith('НИША'):
                 if current_niche:
-                    try:
-                        niche = self._create_niche_from_dict(current_niche, len(niches) + 1)
-                        if niche:
-                            niches.append(niche)
-                    except Exception as e:
-                        logger.error(f"Ошибка создания ниши: {e}")
-                
-                current_niche = {}
-                parts = line.split(':', 1)
-                if len(parts) > 1:
-                    current_niche['type'] = parts[1].strip()
+                    niches.append(current_niche.copy())
+                current_niche = {'id': len(niches) + 1}
+                match = re.search(r'НИША\s+\d+:\s*(.+?)$', line)
+                if match:
+                    current_niche['type'] = match.group(1).strip()
             
             elif line.startswith('НАЗВАНИЕ:'):
                 current_niche['name'] = line.replace('НАЗВАНИЕ:', '').strip()
@@ -930,10 +718,6 @@ class OpenAIService:
             elif line.startswith('СРОК ОКУПАЕМОСТИ:'):
                 current_niche['roi'] = line.replace('СРОК ОКУПАЕМОСТИ:', '').strip()
             
-            elif line.startswith('РИСКИ:'):
-                risks_text = line.replace('РИСКИ:', '').strip()
-                current_niche['risks'] = [r.strip() for r in risks_text.split(',')]
-            
             elif line.startswith('ПЕРВЫЕ 3 ШАГА:'):
                 current_niche['steps'] = []
             elif line.startswith('1.') and 'steps' in current_niche:
@@ -943,250 +727,288 @@ class OpenAIService:
             elif line.startswith('3.') and 'steps' in current_niche:
                 current_niche['steps'].append(line[2:].strip())
         
-        # Добавляем последнюю нишу
         if current_niche:
-            try:
-                niche = self._create_niche_from_dict(current_niche, len(niches) + 1)
-                if niche:
-                    niches.append(niche)
-            except Exception as e:
-                logger.error(f"Ошибка создания последней ниши: {e}")
+            niches.append(current_niche)
+        
+        for niche in niches:
+            if 'steps' not in niche or len(niche['steps']) < 3:
+                niche['steps'] = [
+                    'Провести анализ рынка и конкурентов',
+                    'Создать MVP продукта или услуги',
+                    'Найти первых 3 клиентов для тестирования'
+                ]
         
         return niches
     
-    def _create_niche_from_dict(self, data: Dict, niche_id: int) -> Optional[BusinessNiche]:
-        """Создать объект ниши из словаря"""
+    def _create_fallback_analysis(self, session: UserSession) -> str:
+        """Запасной психологический анализ"""
+        return f"""# ПСИХОЛОГИЧЕСКИЙ АНАЛИЗ (базовый)
+
+## 1. КЛЮЧЕВЫЕ ХАРАКТЕРИСТИКИ:
+- **Тип личности:** Практичный аналитик с творческим потенциалом
+- **Мотивация:** {', '.join(session.motivations)}
+- **Сильные стороны:** Хорошие аналитические способности ({session.skills_analytics}/5), умение общаться ({session.skills_communication}/5)
+- **Энергия:** Пик продуктивности - {session.peak_analytical or 'дневное'} время
+
+## 2. СКРЫТЫЙ ПОТЕНЦИАЛ:
+- Неиспользованная комбинация навыков: аналитика + {session.superpower or 'креативность'}
+- Возможность монетизации образования: {session.education}
+- Географическое преимущество: {session.get_location()}
+
+## 3. ИДЕАЛЬНЫЕ УСЛОВИЯ:
+- Формат: {session.business_format or 'гибрид'}
+- Темп: Умеренный, с быстрым стартом
+- Клиенты: {session.ideal_client_age or '30-40 лет'}, {session.ideal_client_field or 'бизнес'}
+
+## 4. РЕКОМЕНДАЦИИ:
+1. Начинать с небольших проектов для быстрого получения результата
+2. Использовать сильные стороны для создания конкурентного преимущества
+3. Постепенно расширять масштаб по мере роста уверенности"""
+    
+    def _create_fallback_niches(self, session: UserSession) -> List[Dict]:
+        """Запасные бизнес-ниши"""
+        location = session.get_location()
+        
+        return [
+            {
+                'id': 1,
+                'type': '🔥 Быстрый старт',
+                'name': 'Консультационные услуги',
+                'description': f'Предоставление профессиональных консультаций в вашей сфере знаний бизнесам в {location}',
+                'why': 'Использует ваши профессиональные навыки и образование',
+                'format': 'Гибрид',
+                'investment': '10,000-50,000₽',
+                'roi': '1-2 месяца',
+                'steps': [
+                    'Определить 3 ключевые темы для консультаций',
+                    'Создать профессиональное портфолио и предложение',
+                    'Найти 5 потенциальных клиентов через LinkedIn'
+                ]
+            },
+            {
+                'id': 2,
+                'type': '🚀 Сбалансированный',
+                'name': 'Онлайн-обучение',
+                'description': 'Создание и продажа онлайн-курсов по вашей экспертизе',
+                'why': 'Сочетает ваше образование и желание делиться знаниями',
+                'format': 'Онлайн',
+                'investment': '50,000-100,000₽',
+                'roi': '3-4 месяца',
+                'steps': [
+                    'Разработать программу мини-курса',
+                    'Создать 3 пробных урока',
+                    'Запустить предзаказ через соцсети'
+                ]
+            },
+            {
+                'id': 3,
+                'type': '🌱 Долгосрочный',
+                'name': f'Автоматизация бизнес-процессов в {location}',
+                'description': f'Разработка и внедрение систем автоматизации для малого бизнеса в {location}',
+                'why': 'Использует аналитические навыки и интерес к технологиям',
+                'format': 'Гибрид',
+                'investment': '100,000-200,000₽',
+                'roi': '6-8 месяцев',
+                'steps': [
+                    'Изучить популярные CRM системы',
+                    'Разработать 3 пакета услуг автоматизации',
+                    'Провести 10 пробных консультаций'
+                ]
+            },
+            {
+                'id': 4,
+                'type': '💎 Рискованный',
+                'name': 'Технологический стартап',
+                'description': 'Создание SaaS-продукта для решения конкретной проблемы рынка',
+                'why': 'Соответствует высокому уровню риска и техническим навыкам',
+                'format': 'Онлайн',
+                'investment': '300,000-500,000₽',
+                'roi': '12-18 месяцев',
+                'steps': [
+                    'Провести исследование рынка',
+                    'Найти технического сооснователя',
+                    'Разработать прототип продукта'
+                ]
+            },
+            {
+                'id': 5,
+                'type': '🎯 Скрытая ниша',
+                'name': f'Нишевое консультирование в {location}',
+                'description': f'Специализированные консультации для узкой отрасли в {location}',
+                'why': 'Использует уникальное сочетание навыков и образования',
+                'format': session.business_format or 'Гибрид',
+                'investment': '20,000-80,000₽',
+                'roi': '2-3 месяца',
+                'steps': [
+                    'Определить узкую целевую аудиторию',
+                    'Разработать уникальное предложение',
+                    'Найти первых клиентов через нетворкинг'
+                ]
+            }
+        ]
+    
+    def _create_fallback_plan(self, session: UserSession, niche: Dict) -> str:
+        """Запасной детальный план"""
+        return f"""# 📋 ДЕТАЛЬНЫЙ БИЗНЕС-ПЛАН
+
+## 🎯 НИША: {niche.get('name', 'Бизнес-услуги')}
+
+### 1. 🧠 ПСИХОЛОГИЧЕСКАЯ ПОДГОТОВКА (неделя 1)
+- **Ментальная настройка:** Ежедневно 15 минут на визуализацию успеха
+- **Работа со страхами:** Разбивайте большие задачи на маленькие шаги по 30 минут
+- **Ритуалы:** Утренний planning и вечерний review дня
+
+### 2. 🚀 30-ДНЕВНЫЙ ЗАПУСК
+**Неделя 1-2: Подготовка**
+- Создать базовые материалы (визитка, сайт, соцсети)
+- Определить целевую аудиторию и ценностное предложение
+- Подготовить коммерческое предложение
+
+**Неделя 3-4: Первые контакты**
+- Найти 20 потенциальных клиентов
+- Провести 5 пробных консультаций
+- Заключить первые 2-3 договора
+
+### 3. 💰 ФИНАНСОВАЯ ДОРОЖНАЯ КАРТА
+**Стартовые инвестиции:** {niche.get('investment', '50,000-100,000₽')}
+
+**Месяц 1-3:**
+- Доход: 30,000-50,000₽
+- Расходы: 20,000-30,000₽
+- **Цель:** Выйти в ноль к концу 3 месяца
+
+**Месяц 4-6:**
+- Доход: 50,000-80,000₽
+- **Цель:** Стабильный доход 50,000₽ в месяц
+
+**Месяц 7-12:**
+- Доход: 80,000-120,000₽
+- **Цель:** Достичь 100,000₽ в месяц
+
+### 4. 📊 МЕТРИКИ УСПЕХА
+- **Ежедневно:** 3 новых контакта, 1 консультация
+- **Еженедельно:** 2-3 закрытые сделки
+- **Ежемесячно:** Доход от 50,000₽, 5 довольных клиентов
+
+### 5. ⚠️ ТИПИЧНЫЕ ОШИБКИ
+1. **Слишком широкий фокус:** Начинать нужно с узкой ниши
+2. **Недооценка времени:** Учитывайте административную работу
+3. **Отсутствие системы:** Создавайте процессы с первого дня
+
+### 6. 📚 РЕСУРСЫ ДЛЯ РОСТА
+- **Книги:** "От нуля к единице" Питер Тиль, "Бизнес с нуля" Эрик Рис
+- **Сообщества:** Местные бизнес-клубы, Telegram-чаты по вашей теме
+- **Инструменты:** Notion для планирования, Canva для дизайна, Tilda для сайта
+
+💡 **Совет:** Начинайте с малого, быстро тестируйте гипотезы, собирайте обратную связь и масштабируйте то, что работает."""
+
+# ==================== МЕНЕДЖЕР ДАННЫХ ====================
+class DataManager:
+    """Менеджер данных"""
+    
+    def __init__(self):
+        self.user_sessions: Dict[int, UserSession] = {}
+        self.openai_usage = OpenAIUsage()
+        self.stats = BotStatistics()
+        self.cache_dir = Path("./data")
+        self.cache_dir.mkdir(exist_ok=True)
+        self.last_cleanup = datetime.now()
+        
+        # Загружаем сохраненные сессии
+        self._load_sessions()
+    
+    def _load_sessions(self):
+        """Загрузить сохраненные сессии"""
         try:
-            # Определяем категорию по типу
-            type_str = data.get('type', '').lower()
-            category = NicheCategory.BALANCED.value
-            
-            if 'быстр' in type_str:
-                category = NicheCategory.QUICK_START.value
-            elif 'сбаланс' in type_str:
-                category = NicheCategory.BALANCED.value
-            elif 'долгосроч' in type_str:
-                category = NicheCategory.LONG_TERM.value
-            elif 'риск' in type_str:
-                category = NicheCategory.RISKY.value
-            elif 'скрыт' in type_str:
-                category = NicheCategory.HIDDEN.value
-            
-            niche = BusinessNiche(
-                id=niche_id,
-                category=category,
-                name=data.get('name', f'Ниша {niche_id}'),
-                description=data.get('description', 'Описание отсутствует'),
-                why_suitable=data.get('why', 'Соответствует вашему профилю'),
-                format=data.get('format', 'Гибрид'),
-                investment_range=data.get('investment', '50,000-100,000₽'),
-                roi_timeframe=data.get('roi', '3-6 месяцев'),
-                steps=data.get('steps', [
-                    'Провести анализ рынка',
-                    'Создать MVP',
-                    'Найти первых клиентов'
-                ]),
-                risks=data.get('risks', [
-                    'Конкуренция',
-                    'Нехватка клиентов',
-                    'Сезонность спроса'
-                ])
-            )
-            
-            return niche
-            
+            for file_path in self.cache_dir.glob("session_*.json"):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    
+                    # Создаем сессию из данных
+                    session = UserSession(**data)
+                    self.user_sessions[session.user_id] = session
+                    self.stats.active_sessions += 1
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка загрузки сессии из {file_path}: {e}")
         except Exception as e:
-            logger.error(f"Ошибка создания ниши: {e}")
-            return None
+            logger.error(f"Ошибка загрузки сессий: {e}")
     
-    def _create_fallback_niches(self, session: UserSession) -> List[BusinessNiche]:
-        """Создать запасные ниши"""
-        location = session.demographics.get_full_location()
-        age = session.demographics.age_group or "не указан"
-        
-        fallback_niches = [
-            BusinessNiche(
-                id=9991,
-                category=NicheCategory.QUICK_START.value,
-                name=f"Консультации в {location}",
-                description=f"Предоставление профессиональных консультаций в вашей сфере знаний бизнесам в {location}",
-                why_suitable="Использует ваши профессиональные навыки и образование",
-                format="Гибрид",
-                investment_range="10,000-50,000₽",
-                roi_timeframe="1-2 месяца",
-                steps=[
-                    f"Изучить рынок консультационных услуг в {location}",
-                    "Создать пакет услуг и ценообразование",
-                    "Найти 5 первых клиентов через LinkedIn"
-                ],
-                risks=["Низкая платежеспособность клиентов", "Сезонность спроса", "Конкуренция"]
-            ),
-            BusinessNiche(
-                id=9992,
-                category=NicheCategory.BALANCED.value,
-                name="Онлайн-курс по вашей экспертизе",
-                description="Создание и продажа онлайн-курсов по вашей профессиональной области",
-                why_suitable="Сочетает ваше образование и желание делиться знаниями",
-                format="Онлайн",
-                investment_range="50,000-150,000₽",
-                roi_timeframe="3-4 месяца",
-                steps=[
-                    "Определить целевую аудиторию и их боли",
-                    "Создать программу и контент мини-курса",
-                    "Запустить предзаказ через соцсети"
-                ],
-                risks=["Низкая конверсия", "Высокая конкуренция", "Сложность создания качественного контента"]
-            ),
-            BusinessNiche(
-                id=9993,
-                category=NicheCategory.LONG_TERM.value,
-                name=f"Автоматизация для бизнеса в {location}",
-                description=f"Разработка и внедрение систем автоматизации для малого бизнеса в {location}",
-                why_suitable="Использует аналитические навыки и интерес к технологиям",
-                format="Гибрид",
-                investment_range="100,000-300,000₽",
-                roi_timeframe="6-8 месяцев",
-                steps=[
-                    "Изучить популярные CRM и системы автоматизации",
-                    "Разработать 3 пакета услуг для разных сегментов",
-                    "Провести 10 пробных консультаций"
-                ],
-                risks=["Высокий порог входа", "Долгая окупаемость", "Сложность продаж"]
+    def save_session(self, session: UserSession):
+        """Сохранить сессию"""
+        try:
+            file_path = self.cache_dir / f"session_{session.user_id}.json"
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(asdict(session), f, ensure_ascii=False, indent=2, default=str)
+        except Exception as e:
+            logger.error(f"Ошибка сохранения сессии {session.user_id}: {e}")
+    
+    def get_or_create_session(self, user_id: int, chat_id: int, **kwargs) -> UserSession:
+        """Получить или создать сессию"""
+        if user_id in self.user_sessions:
+            session = self.user_sessions[user_id]
+            session.update_activity()
+            return session
+        else:
+            session = UserSession(
+                user_id=user_id,
+                chat_id=chat_id,
+                username=kwargs.get('username'),
+                first_name=kwargs.get('first_name'),
+                last_name=kwargs.get('last_name')
             )
-        ]
-        
-        return fallback_niches
+            self.user_sessions[user_id] = session
+            self.stats.total_users += 1
+            self.stats.active_sessions += 1
+            return session
     
-    async def generate_detailed_plan(self, session: UserSession, niche: BusinessNiche) -> Optional[DetailedPlan]:
-        """Генерация детального плана"""
-        logger.info(f"📋 Генерация плана для ниши: {niche.name}")
+    def cleanup_old_sessions(self, max_age_hours: int = 24):
+        """Очистить старые сессии"""
+        now = datetime.now()
+        if (now - self.last_cleanup).total_seconds() < 3600:
+            return
         
-        profile = session.to_openai_profile()
+        expired = []
+        for user_id, session in self.user_sessions.items():
+            if (now - session.last_activity).total_seconds() > max_age_hours * 3600:
+                expired.append(user_id)
         
-        prompt = f"""Создай ГИПЕРПЕРСОНАЛИЗИРОВАННЫЙ БИЗНЕС-ПЛАН для ниши:
-
-## НИША:
-{niche.name} ({niche.category})
-{niche.description}
-
-## ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:
-• Возраст: {profile['demographics']['age_group']}
-• Образование: {profile['demographics']['education']}
-• Локация: {profile['demographics']['location']}
-• Мотивация: {', '.join(profile['personality']['motivations'])}
-• Страхи: {', '.join(profile['personality']['fears'])}
-• Бюджет: {profile['limitations']['budget']}
-• Время: {profile['limitations']['time_per_week']}
-• Суперсила: {profile['skills']['superpower']}
-• Пик продуктивности: Аналитика={profile['personality']['energy_profile']['peak_analytical']}, Креатив={profile['personality']['energy_profile']['peak_creative']}
-
-## ОСОБЫЕ ТРЕБОВАНИЯ:
-1. УЧЕСТЬ ВОЗРАСТ {profile['demographics']['age_group']} - предложить соответствующий темп
-2. ИСПОЛЬЗОВАТЬ ОБРАЗОВАНИЕ {profile['demographics']['education']}
-3. УЧЕСТЬ ЛОКАЦИЮ {profile['demographics']['location']}
-4. ОБОЙТИ СТРАХИ: {', '.join(profile['personality']['fears'])}
-5. УЛОЖИТЬСЯ В {profile['limitations']['time_per_week']} ЧАСОВ В НЕДЕЛЮ
-6. ИСПОЛЬЗОВАТЬ СУПЕРСИЛУ {profile['skills']['superpower']}
-
-## СТРУКТУРА ПЛАНА:
-
-### 1. ПСИХОЛОГИЧЕСКАЯ ПОДГОТОВКА (день 1-7)
-- Ментальная настройка для этой ниши
-- Ежедневные ритуалы и привычки
-- Техники работы со страхами
-- Подготовка окружения
-
-### 2. ПОШАГОВЫЙ ЗАПУСК (30 дней, по дням)
-#### Неделя 1: Подготовка (конкретные действия по дням)
-#### Неделя 2: Создание активов (сайт, соцсети, материалы)
-#### Неделя 3: Первые контакты и тестовые продажи
-#### Неделя 4: Анализ результатов и корректировка
-
-### 3. ФИНАНСОВАЯ ДОРОЖНАЯ КАРТА (12 месяцев)
-#### Месяц 1-3: Выход в ноль (конкретные цифры доходов/расходов)
-#### Месяц 4-6: Доход 50,000₽ в месяц (как достичь, конкретные шаги)
-#### Месяц 7-12: Доход 100,000₽ в месяц (стратегия масштабирования)
-#### Инвестиции по месяцам (детально)
-
-### 4. МЕТРИКИ УСПЕХА И KPI
-- Ежедневные метрики (3 конкретных показателя)
-- Еженедельные метрики (3 показателя)
-- Ежемесячные метрики (3 показателя)
-- Критические точки контроля
-
-### 5. ЧЕК-ЛИСТ ОШИБОК И РЕШЕНИЙ
-- Типичные ошибки новичков в этой нише (5-7 ошибок)
-- Как распознать их заранее
-- Конкретные решения для каждой ошибки
-- План Б на случай серьезных проблем
-
-### 6. РЕСУРСЫ ДЛЯ РОСТА И РАЗВИТИЯ
-- Книги (конкретные названия, почему подходят)
-- Курсы (конкретные, с ссылками если возможно)
-- Сообщества и нетворкинг (где искать)
-- Инструменты и софт (список с описанием)
-
-Верни ответ в формате JSON:
-{{
-  "psychological_prep": "текст",
-  "day_by_day_launch": "текст",
-  "financial_roadmap": "текст",
-  "success_metrics": "текст",
-  "common_mistakes": "текст",
-  "resources": "текст",
-  "age_adapted": "как адаптировано под возраст",
-  "location_adapted": "как адаптировано под локацию"
-}}"""
-
-        messages = [
-            {"role": "system", "content": self._create_system_prompt("plan_creator")},
-            {"role": "user", "content": prompt}
-        ]
+        for user_id in expired:
+            if user_id in self.user_sessions:
+                self.save_session(self.user_sessions[user_id])
+                del self.user_sessions[user_id]
+                self.stats.active_sessions -= 1
         
-        response = await self._call_openai(messages, max_tokens=4000, temperature=0.6)
+        if expired:
+            logger.info(f"Очищено {len(expired)} неактивных сессий")
         
-        if response:
-            try:
-                content = response["content"]
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    plan_data = json.loads(json_match.group())
-                    plan = DetailedPlan(
-                        niche_id=niche.id,
-                        niche_name=niche.name,
-                        **plan_data
-                    )
-                    self.data_manager.add_generated_plan()
-                    return plan
-                else:
-                    # Создаем простой план
-                    plan = DetailedPlan(
-                        niche_id=niche.id,
-                        niche_name=niche.name,
-                        psychological_prep=content[:800] if len(content) > 800 else content,
-                        day_by_day_launch=content[800:1600] if len(content) > 1600 else "",
-                        financial_roadmap=content[1600:2400] if len(content) > 2400 else "",
-                        success_metrics="Ежедневные: 3 новых контакта\nЕженедельные: 2 сделки\nЕжемесячные: 50,000₽ дохода",
-                        common_mistakes="1. Слишком широкий фокус\n2. Недооценка времени\n3. Отсутствие системы",
-                        resources="Книги: 'От нуля к единице'\nКурсы: основы маркетинга\nИнструменты: Notion, Canva, Tilda",
-                        age_adapted=f"Адаптировано под {profile['demographics']['age_group']}",
-                        location_adapted=f"Адаптировано под {profile['demographics']['location']}"
-                    )
-                    self.data_manager.add_generated_plan()
-                    return plan
-            except Exception as e:
-                logger.error(f"Ошибка парсинга плана: {e}")
-                return None
-        
-        return None
+        self.last_cleanup = now
+    
+    def mark_profile_completed(self, user_id: int):
+        """Пометить профиль как завершенный"""
+        if user_id in self.user_sessions:
+            self.stats.completed_profiles += 1
+            self.save_session(self.user_sessions[user_id])
+    
+    def add_generated_niches(self, niches_count: int):
+        """Добавить сгенерированные ниши"""
+        self.stats.generated_niches += niches_count
+    
+    def add_generated_plan(self):
+        """Добавить сгенерированный план"""
+        self.stats.generated_plans += 1
+    
+    def increment_messages(self):
+        """Увеличить счетчик сообщений"""
+        self.stats.total_messages += 1
 
-# ==================== UX/UI КОМПОНЕНТЫ ====================
+# ==================== UX МЕНЕДЖЕР ====================
 class UXManager:
     """Менеджер пользовательского опыта"""
     
     def __init__(self, config: BotConfig):
         self.config = config
-        self.progress_emojis = config.progress_emojis
     
     def get_random_praise(self) -> str:
         """Получить случайную фразу похвалы"""
@@ -1197,103 +1019,69 @@ class UXManager:
         progress_bar = session.get_progress_bar()
         question_num = session.current_question
         
-        emoji = self.progress_emojis[min(question_num - 1, len(self.progress_emojis) - 1)]
+        emojis = ["🔴", "🟠", "🟡", "🟢", "🔵", "🟣"]
+        emoji = emojis[min(question_num - 1, len(emojis) - 1)] if question_num > 0 else "🟢"
         
         return f"{emoji} *Вопрос {question_num}/{session.total_questions}*\n{progress_bar}\n"
     
-    def format_niche_for_display(self, niche: BusinessNiche, index: int, total: int) -> str:
+    def format_niche_for_display(self, niche: Dict, index: int, total: int) -> str:
         """Форматировать нишу для отображения"""
-        steps_text = "\n".join([f"{i+1}. {step}" for i, step in enumerate(niche.steps[:3])])
-        risks_text = "\n".join([f"• {risk}" for risk in niche.risks[:3]])
+        steps_text = "\n".join([f"{i+1}. {step}" for i, step in enumerate(niche.get('steps', [])[:3])])
         
         return f"""🎯 *НИША {index} из {total}*
 
-{niche.category}
+{niche.get('type', '🔥 Ниша')}
 
-*{niche.name}*
+*{niche.get('name', 'Название')}*
 
 📝 *Суть:*
-{niche.description}
+{niche.get('description', 'Описание')}
 
 ✅ *Почему вам подходит:*
-{niche.why_suitable}
+{niche.get('why', 'Соответствует вашему профилю')}
 
 📊 *Детали:*
-• Формат: {niche.format}
-• Инвестиции: {niche.investment_range}
-• Окупаемость: {niche.roi_timeframe}
-
-⚠️ *Основные риски:*
-{risks_text}
+• Формат: {niche.get('format', 'Гибрид')}
+• Инвестиции: {niche.get('investment', '50,000-100,000₽')}
+• Окупаемость: {niche.get('roi', '3-6 месяцев')}
 
 🚀 *Первые шаги:*
 {steps_text}"""
     
-    def format_analysis_for_display(self, analysis: PsychologicalAnalysis) -> str:
+    def format_analysis_for_display(self, analysis: str) -> str:
         """Форматировать анализ для отображения"""
         return f"""🧠 *ПСИХОЛОГИЧЕСКИЙ АНАЛИЗ*
 
-*Демографические возможности:*
-{analysis.demographic_insights[:500]}...
-
-*Психологический портрет:*
-{analysis.personality_profile[:500]}...
-
-*Скрытый потенциал:*
-{analysis.hidden_potential[:500]}...
-
-*Идеальные условия:*
-{analysis.ideal_conditions[:500]}..."""
+{analysis[:3000]}..."""
     
-    def format_plan_for_display(self, plan: DetailedPlan) -> str:
-        """Форматировать план для отображения"""
-        return f"""📋 *ДЕТАЛЬНЫЙ БИЗНЕС-ПЛАН*
-
-*{plan.niche_name}*
-
-🧠 *Психологическая подготовка:*
-{plan.psychological_prep[:800]}...
-
-🚀 *30-дневный запуск:*
-{plan.day_by_day_launch[:800]}...
-
-💰 *Финансовая дорожная карта:*
-{plan.financial_roadmap[:800]}...
-
-📊 *Метрики успеха:*
-{plan.success_metrics}"""
-    
-    def create_navigation_keyboard(self, session: UserSession) -> InlineKeyboardMarkup:
-        """Создать клавиатуру навигации"""
+    def create_niche_navigation(self, session: UserSession) -> InlineKeyboardMarkup:
+        """Создать клавиатуру навигации по нишам"""
         keyboard = []
         
-        # Навигация по нишам
         if session.generated_niches:
-            current_idx = session.current_question - session.total_questions - 1
-            if current_idx < 0:
-                current_idx = 0
+            current_idx = session.selected_niche_index
+            total = len(session.generated_niches)
             
+            # Кнопки навигации
             nav_buttons = []
             if current_idx > 0:
-                nav_buttons.append(InlineKeyboardButton("◀️ Предыдущая", callback_data=f"niche_prev"))
+                nav_buttons.append(InlineKeyboardButton("◀️ Предыдущая", callback_data="niche_prev"))
             
-            nav_buttons.append(InlineKeyboardButton(
-                f"{current_idx + 1}/{len(session.generated_niches)}", 
-                callback_data="niche_current"
-            ))
+            nav_buttons.append(InlineKeyboardButton(f"{current_idx + 1}/{total}", callback_data="niche_current"))
             
-            if current_idx < len(session.generated_niches) - 1:
-                nav_buttons.append(InlineKeyboardButton("Следующая ▶️", callback_data=f"niche_next"))
+            if current_idx < total - 1:
+                nav_buttons.append(InlineKeyboardButton("Следующая ▶️", callback_data="niche_next"))
             
             if nav_buttons:
                 keyboard.append(nav_buttons)
             
-            # Кнопки действий для текущей ниши
-            if 0 <= current_idx < len(session.generated_niches):
-                niche = session.generated_niches[current_idx]
-                keyboard.append([
-                    InlineKeyboardButton("📋 Полный план", callback_data=f"plan_{niche.id}")
-                ])
+            # Кнопки действий
+            current_niche = session.generated_niches[current_idx]
+            niche_id = current_niche.get('id', current_idx + 1)
+            
+            keyboard.append([
+                InlineKeyboardButton("📋 Детальный план", callback_data=f"plan_{niche_id}")
+            ])
         
         # Общие кнопки
         keyboard.append([
@@ -1310,18 +1098,20 @@ class UXManager:
     
     def create_question_keyboard(self, question_type: QuestionType, options: List[Any] = None) -> Optional[InlineKeyboardMarkup]:
         """Создать клавиатуру для вопроса"""
-        if question_type == QuestionType.BUTTONS and options:
-            keyboard = []
+        if not options:
+            return None
+        
+        keyboard = []
+        
+        if question_type == QuestionType.BUTTONS:
             for option in options:
                 if isinstance(option, tuple):
                     text, callback_data = option
                     keyboard.append([InlineKeyboardButton(text, callback_data=callback_data)])
                 else:
                     keyboard.append([InlineKeyboardButton(option, callback_data=option)])
-            return InlineKeyboardMarkup(keyboard)
         
-        elif question_type == QuestionType.MULTISELECT and options:
-            keyboard = []
+        elif question_type == QuestionType.MULTISELECT:
             for option in options:
                 if isinstance(option, tuple):
                     text, callback_data = option
@@ -1329,1215 +1119,16 @@ class UXManager:
                 else:
                     keyboard.append([InlineKeyboardButton(f"□ {option}", callback_data=f"select_{option}")])
             keyboard.append([InlineKeyboardButton("✅ Завершить выбор", callback_data="multiselect_done")])
-            return InlineKeyboardMarkup(keyboard)
         
         elif question_type == QuestionType.SLIDER:
-            # Простой слайдер для демонстрации
-            keyboard = []
+            # Простой слайдер
             row = []
             for i in range(1, 6):
                 row.append(InlineKeyboardButton(str(i), callback_data=f"slider_{i}"))
             keyboard.append(row)
             keyboard.append([InlineKeyboardButton("✅ Подтвердить", callback_data="slider_confirm")])
-            return InlineKeyboardMarkup(keyboard)
         
-        return None
-
-# ==================== ВОПРОСНИК ====================
-class QuestionnaireManager:
-    """Менеджер вопросника"""
-    
-    def __init__(self, ux_manager: UXManager):
-        self.ux = ux_manager
-        self.questions = self._load_questions()
-    
-    def _load_questions(self) -> List[Dict]:
-        """Загрузить все вопросы"""
-        return [
-            # Часть 1: Демография
-            {
-                "id": 1,
-                "text": "🔢 *ВАШ ВОЗРАСТ*\n\nВыберите вашу возрастную группу:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("18-25 лет", "age_18-25"),
-                    ("26-35 лет", "age_26-35"),
-                    ("36-45 лет", "age_36-45"),
-                    ("46+ лет", "age_46+")
-                ],
-                "part": "ДЕМОГРАФИЯ",
-                "handler": "_handle_age"
-            },
-            {
-                "id": 2,
-                "text": "🎓 *ВАШЕ ОБРАЗОВАНИЕ*\n\nВыберите ваш образовательный уровень:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("Среднее", "edu_school"),
-                    ("Среднее специальное", "edu_college"),
-                    ("Неоконченное высшее", "edu_incomplete"),
-                    ("Высшее (бакалавр)", "edu_bachelor"),
-                    ("Высшее (магистр/специалист)", "edu_master"),
-                    ("Два и более высших", "edu_multiple"),
-                    ("MBA/аспирантура", "edu_mba"),
-                    ("Самообразование", "edu_self")
-                ],
-                "part": "ДЕМОГРАФИЯ",
-                "handler": "_handle_education"
-            },
-            {
-                "id": 3,
-                "text": "🏙️ *ВАШ ГОРОД/РЕГИОН*\n\nВыберите тип вашего населенного пункта:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("Москва", "loc_moscow"),
-                    ("Санкт-Петербург", "loc_spb"),
-                    ("Город-миллионник", "loc_million"),
-                    ("Областной центр", "loc_region"),
-                    ("Малый город", "loc_small"),
-                    ("Село/деревня", "loc_village"),
-                    ("Другое (напишу)", "loc_custom")
-                ],
-                "part": "ДЕМОГРАФИЯ",
-                "handler": "_handle_location_type"
-            },
-            {
-                "id": 4,
-                "text": "🏙️ *НАЗВАНИЕ ВАШЕГО ГОРОДА/РЕГИОНА*\n\nНапишите название вашего города или региона:",
-                "type": QuestionType.TEXT,
-                "part": "ДЕМОГРАФИЯ",
-                "handler": "_handle_location_custom"
-            },
-            
-            # Часть 2: Личность и мотивация
-            {
-                "id": 5,
-                "text": "🎯 *КЛЮЧЕВАЯ МОТИВАЦИЯ*\n\nЧто для вас ВАЖНЕЕ ВСЕГО в бизнесе?\nВыберите 2-3 самых важных пункта:",
-                "type": QuestionType.MULTISELECT,
-                "options": [
-                    ("Свобода и независимость", "mot_freedom"),
-                    ("Стабильный высокий доход", "mot_money"),
-                    ("Помощь людям", "mot_help"),
-                    ("Творческая реализация", "mot_creative"),
-                    ("Решение сложных вызовов", "mot_challenge"),
-                    ("Признание, статус", "mot_status"),
-                    ("Баланс работы и жизни", "mot_balance"),
-                    ("Наследие, долгосрочный проект", "mot_legacy")
-                ],
-                "part": "ЛИЧНОСТЬ",
-                "min_selections": 2,
-                "max_selections": 3,
-                "handler": "_handle_motivation"
-            },
-            {
-                "id": 6,
-                "text": "🧩 *СТИЛЬ ПРИНЯТИЯ РЕШЕНИЙ*\n\n*Ситуация:* Нужно выбрать между двумя проектами.\n\nКакой подход вам ближе?",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("💖 Проект А - нравится интуитивно", "dec_feelings"),
-                    ("📊 Проект Б - больше цифр и аналитики", "dec_logic"),
-                    ("🤝 Посоветуюсь с близкими/экспертами", "dec_advice"),
-                    ("⚖️ Составлю таблицу плюсов/минусов", "dec_table"),
-                    ("🎯 Выберу то, что быстрее принесет результат", "dec_fast")
-                ],
-                "part": "ЛИЧНОСТЬ",
-                "handler": "_handle_decision_style"
-            },
-            {
-                "id": 7,
-                "text": "🎲 *ОТНОШЕНИЕ К РИСКУ*\n\n*Ситуация:* У вас есть 100,000₽ свободных денег.\n\nНа что готовы их использовать?",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("🔒 Только на проверенные инвестиции", "risk_safe"),
-                    ("🎓 На обучение/развитие навыков", "risk_learning"),
-                    ("🚀 На запуск своего дела", "risk_business"),
-                    ("🎰 На рискованный стартап", "risk_startup")
-                ],
-                "part": "ЛИЧНОСТЬ",
-                "handler": "_handle_risk_scenario"
-            },
-            {
-                "id": 8,
-                "text": "🎲 *УРОВЕНЬ РИСКА*\n\nОцените ваш общий уровень толерантности к риску:\n1 - максимальная осторожность, 10 - готов к высоким рискам",
-                "type": QuestionType.SLIDER,
-                "part": "ЛИЧНОСТЬ",
-                "min_value": 1,
-                "max_value": 10,
-                "default_value": 5,
-                "handler": "_handle_risk_level"
-            },
-            {
-                "id": 9,
-                "text": "⚡ *ЭНЕРГЕТИЧЕСКИЙ ПРОФИЛЬ*\n\nКак распределяется ваша ЭНЕРГИЯ в течение дня?\n(1 - минимальная энергия, 7 - максимальная)",
-                "type": QuestionType.TEXT,
-                "part": "ЛИЧНОСТЬ",
-                "subquestions": [
-                    ("УТРО (6:00-12:00):", "energy_morning"),
-                    ("ДЕНЬ (12:00-18:00):", "energy_day"),
-                    ("ВЕЧЕР (18:00-24:00):", "energy_evening")
-                ],
-                "handler": "_handle_energy_profile"
-            },
-            {
-                "id": 10,
-                "text": "⚡ *ПИКОВАЯ ПРОДУКТИВНОСТЬ*\n\nКогда вы наиболее продуктивны для разных типов задач?\n\nВыберите для каждого типа:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("🌅 Утро", "peak_morning"),
-                    ("☀️ День", "peak_day"),
-                    ("🌙 Вечер", "peak_evening")
-                ],
-                "part": "ЛИЧНОСТЬ",
-                "subquestions": [
-                    ("Аналитическая работа", "peak_analytical"),
-                    ("Творческая работа", "peak_creative"),
-                    ("Общение с людьми", "peak_social")
-                ],
-                "handler": "_handle_peak_hours"
-            },
-            {
-                "id": 11,
-                "text": "👻 *ГЛУБИННЫЕ СТРАХИ*\n\nЧего вы БОЛЬШЕ ВСЕГО БОИТЕСЬ в бизнесе?\nВыберите 1-2 главных страха:",
-                "type": QuestionType.MULTISELECT,
-                "options": [
-                    ("Финансовая нестабильность", "fear_financial"),
-                    ("Не справиться технически", "fear_technical"),
-                    ("Провал, осуждение близких", "fear_failure"),
-                    ("Выгорание, потеря интереса", "fear_burnout"),
-                    ("Юридические проблемы", "fear_legal"),
-                    ("Не найти клиентов", "fear_clients"),
-                    ("Конкуренция", "fear_competition")
-                ],
-                "part": "ЛИЧНОСТЬ",
-                "min_selections": 1,
-                "max_selections": 2,
-                "handler": "_handle_fears_select"
-            },
-            {
-                "id": 12,
-                "text": "👻 *ОПИШИТЕ ВАШ СТРАХ*\n\nА теперь опишите СВОИМИ СЛОВАМИ:\n\"Мой самый большой страх в бизнесе - это...\"",
-                "type": QuestionType.TEXT,
-                "part": "ЛИЧНОСТЬ",
-                "handler": "_handle_fear_custom"
-            },
-            
-            # Часть 3: Навыки
-            {
-                "id": 13,
-                "text": "🧠 *АНАЛИТИЧЕСКИЕ НАВЫКИ*\n\nОцените ваш уровень аналитики и работы с цифрами:\n(1 - начинающий, 5 - эксперт)",
-                "type": QuestionType.RATING,
-                "part": "НАВЫКИ",
-                "skill": "analytics",
-                "min_value": 1,
-                "max_value": 5,
-                "handler": "_handle_skill_rating"
-            },
-            {
-                "id": 14,
-                "text": "💬 *КОММУНИКАЦИОННЫЕ НАВЫКИ*\n\nОцените ваши навыки общения и переговоров:",
-                "type": QuestionType.RATING,
-                "part": "НАВЫКИ",
-                "skill": "communication",
-                "min_value": 1,
-                "max_value": 5,
-                "handler": "_handle_skill_rating"
-            },
-            {
-                "id": 15,
-                "text": "🎨 *ТВОРЧЕСКИЕ НАВЫКИ*\n\nОцените ваши навыки дизайна и креативности:",
-                "type": QuestionType.RATING,
-                "part": "НАВЫКИ",
-                "skill": "design",
-                "min_value": 1,
-                "max_value": 5,
-                "handler": "_handle_skill_rating"
-            },
-            {
-                "id": 16,
-                "text": "📊 *ОРГАНИЗАЦИОННЫЕ НАВЫКИ*\n\nОцените ваши навыки планирования и организации:",
-                "type": QuestionType.RATING,
-                "part": "НАВЫКИ",
-                "skill": "organization",
-                "min_value": 1,
-                "max_value": 5,
-                "handler": "_handle_skill_rating"
-            },
-            {
-                "id": 17,
-                "text": "🔧 *НАВЫКИ РУЧНОГО ТРУДА*\n\nОцените ваши навыки работы руками:",
-                "type": QuestionType.RATING,
-                "part": "НАВЫКИ",
-                "skill": "manual",
-                "min_value": 1,
-                "max_value": 5,
-                "handler": "_handle_skill_rating"
-            },
-            {
-                "id": 18,
-                "text": "❤️ *ЭМОЦИОНАЛЬНЫЙ ИНТЕЛЛЕКТ*\n\nОцените ваш эмоциональный интеллект:",
-                "type": QuestionType.RATING,
-                "part": "НАВЫКИ",
-                "skill": "emotional_iq",
-                "min_value": 1,
-                "max_value": 5,
-                "handler": "_handle_skill_rating"
-            },
-            {
-                "id": 19,
-                "text": "🌟 *ВАША СУПЕРСИЛА*\n\nЕСЛИ БЫ ВЫ БЫЛИ СУПЕРГЕРОЕМ, ваша суперсила была бы:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("🔮 ПРЕДВИДЕНИЕ - вижу тренды", "power_vision"),
-                    ("💬 УБЕЖДЕНИЕ - договариваюсь", "power_persuasion"),
-                    ("🔧 ИНЖЕНЕРИЯ - решаю задачи", "power_engineering"),
-                    ("🎨 СОЗИДАНИЕ - создаю красивое", "power_creation"),
-                    ("👁️ ПРОНИКНОВЕНИЕ - понимаю мотивы", "power_insight"),
-                    ("⚡ ЭНЕРГИЯ - работаю на энтузиазме", "power_energy")
-                ],
-                "part": "НАВЫКИ",
-                "handler": "_handle_superpower"
-            },
-            {
-                "id": 20,
-                "text": "🔄 *РЕЖИМ РАБОТЫ*\n\nКак вы ЛУЧШЕ ВСЕГО РАБОТАЕТЕ?\nВыберите вашу идеальную рабочую среду:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("👤 В одиночку", "work_alone"),
-                    ("👥 В паре", "work_pair"),
-                    ("👨‍👩‍👧‍👦 В команде 3-5 человек", "work_team"),
-                    ("🏢 В структуре с ролями", "work_structure"),
-                    ("🌐 Удаленно", "work_remote"),
-                    ("🤸 Гибко - меняю форматы", "work_flexible")
-                ],
-                "part": "НАВЫКИ",
-                "handler": "_handle_work_style"
-            },
-            {
-                "id": 21,
-                "text": "📚 *СТИЛЬ ОБУЧЕНИЯ*\n\nКак вы лучше всего учитесь новому?\nРаспределите 10 баллов между форматами:",
-                "type": QuestionType.TEXT,
-                "part": "НАВЫКИ",
-                "handler": "_handle_learning_style"
-            },
-            
-            # Часть 4: Ценности
-            {
-                "id": 22,
-                "text": "🌍 *ЭКЗИСТЕНЦИАЛЬНЫЙ ВОПРОС*\n\n*Задание на 2 минуты размышления:*\n\n\"Если бы вам не нужно было зарабатывать деньги и все базовые потребности были бы удовлетворены...\"\n\nЧЕМ БЫ ВЫ ЗАНИМАЛИСЬ?\n(опишите подробно, 3-5 предложений)",
-                "type": QuestionType.TEXT,
-                "part": "ЦЕННОСТИ",
-                "handler": "_handle_existential"
-            },
-            {
-                "id": 23,
-                "text": "⏳ *СОСТОЯНИЕ ПОТОКА*\n\nВспомните момент, когда вы полностью погружались в дело и теряли чувство времени:\n\nКакое это было дело? Опишите одним предложением.",
-                "type": QuestionType.TEXT,
-                "part": "ЦЕННОСТИ",
-                "handler": "_handle_flow_experience"
-            },
-            {
-                "id": 24,
-                "text": "⏳ *ОЩУЩЕНИЯ В ПОТОКЕ*\n\nТеперь опишите свои ОЩУЩЕНИЯ в тот момент:\n\"Я чувствовал(а)...\" (2-3 предложения)",
-                "type": QuestionType.TEXT,
-                "part": "ЦЕННОСТИ",
-                "handler": "_handle_flow_feelings"
-            },
-            {
-                "id": 25,
-                "text": "👥 *ИДЕАЛЬНЫЙ КЛИЕНТ*\n\nОпишите человека, с которым вам было бы ИНТЕРЕСНО и ПРИЯТНО работать:\n\nВыберите возрастную группу:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("20-30 лет", "client_20-30"),
-                    ("30-40 лет", "client_30-40"),
-                    ("40-50 лет", "client_40-50"),
-                    ("50+ лет", "client_50+")
-                ],
-                "part": "ЦЕННОСТИ",
-                "handler": "_handle_client_age"
-            },
-            {
-                "id": 26,
-                "text": "👥 *СФЕРА ДЕЯТЕЛЬНОСТИ КЛИЕНТА*\n\nВыберите сферу деятельности вашего идеального клиента:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("💻 IT/Технологии", "field_it"),
-                    ("🎨 Творчество/Дизайн", "field_creative"),
-                    ("💼 Бизнес/Предпринимательство", "field_business"),
-                    ("📚 Образование", "field_education"),
-                    ("🏥 Здоровье/Красота", "field_health"),
-                    ("🌿 Другое", "field_other")
-                ],
-                "part": "ЦЕННОСТИ",
-                "handler": "_handle_client_field"
-            },
-            {
-                "id": 27,
-                "text": "👥 *ГЛАВНАЯ \"БОЛЬ\" КЛИЕНТА*\n\nКакая главная \"боль\" у вашего идеального клиента?",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("⏰ Не хватает времени", "pain_time"),
-                    ("📊 Нет системности", "pain_system"),
-                    ("🎓 Нет экспертизы", "pain_expertise"),
-                    ("👥 Нет клиентов", "pain_clients"),
-                    ("💰 Не хватает денег", "pain_money")
-                ],
-                "part": "ЦЕННОСТИ",
-                "handler": "_handle_client_pain"
-            },
-            {
-                "id": 28,
-                "text": "👥 *ДЕТАЛИ О КЛИЕНТЕ*\n\nДобавьте деталей одним-двумя предложениями:\n\"Мне нравится работать с людьми, которые...\"",
-                "type": QuestionType.TEXT,
-                "part": "ЦЕННОСТИ",
-                "handler": "_handle_client_details"
-            },
-            
-            # Часть 5: Ограничения
-            {
-                "id": 29,
-                "text": "🛠️ *РЕСУРСНАЯ КАРТА*\n\nЧто у вас уже есть для старта?\n\n1. ДЕНЬГИ для инвестиций:",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("< 50,000₽", "budget_50k"),
-                    ("50,000-200,000₽", "budget_200k"),
-                    ("200,000-500,000₽", "budget_500k"),
-                    ("> 500,000₽", "budget_more")
-                ],
-                "part": "ОГРАНИЧЕНИЯ",
-                "handler": "_handle_budget"
-            },
-            {
-                "id": 30,
-                "text": "🛠️ *ОБОРУДОВАНИЕ*\n\nКакое оборудование у вас уже есть?\n(можно выбрать несколько)",
-                "type": QuestionType.MULTISELECT,
-                "options": [
-                    ("💻 Компьютер/ноутбук", "equip_computer"),
-                    ("📷 Камера/фотоаппарат", "equip_camera"),
-                    ("🔧 Специнструменты", "equip_tools"),
-                    ("🏠 Помещение/мастерская", "equip_space")
-                ],
-                "part": "ОГРАНИЧЕНИЯ",
-                "handler": "_handle_equipment"
-            },
-            {
-                "id": 31,
-                "text": "🛠️ *ЗНАНИЯ И ДОСТУП*\n\nКакие нематериальные активы у вас есть?\n(можно выбрать несколько)",
-                "type": QuestionType.MULTISELECT,
-                "options": [
-                    ("🤝 Профессиональные связи", "know_connections"),
-                    ("🎓 Уникальная экспертиза", "know_expertise"),
-                    ("📊 Доступ к информации", "know_info"),
-                    ("🌟 Личный бренд/аудитория", "know_brand")
-                ],
-                "part": "ОГРАНИЧЕНИЯ",
-                "handler": "_handle_knowledge"
-            },
-            {
-                "id": 32,
-                "text": "⏰ *ВРЕМЕННОЙ БЮДЖЕТ*\n\nСколько часов в неделю вы реально можете уделить бизнесу на старте?",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("5-10 часов", "time_5-10"),
-                    ("10-20 часов", "time_10-20"),
-                    ("20-30 часов", "time_20-30"),
-                    ("30-40 часов", "time_30-40"),
-                    ("40+ часов", "time_40+")
-                ],
-                "part": "ОГРАНИЧЕНИЯ",
-                "handler": "_handle_time"
-            },
-            {
-                "id": 33,
-                "text": "📍 *МАСШТАБ БИЗНЕСА*\n\nКакой масштаб бизнеса вас привлекает?",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("📍 Локальный (район/город)", "scale_local"),
-                    ("🗺️ Региональный (область)", "scale_region"),
-                    ("🇷🇺 Национальный (Россия)", "scale_national"),
-                    ("🌍 Международный", "scale_international"),
-                    ("🌐 Онлайн-глобальный", "scale_online")
-                ],
-                "part": "ОГРАНИЧЕНИЯ",
-                "handler": "_handle_scale"
-            },
-            {
-                "id": 34,
-                "text": "📍 *ФОРМАТ РАБОТЫ*\n\nКакие у вас предпочтения по формату работы?",
-                "type": QuestionType.BUTTONS,
-                "options": [
-                    ("🌐 Только онлайн", "format_online"),
-                    ("🏪 Только офлайн", "format_offline"),
-                    ("🔄 Гибрид", "format_hybrid")
-                ],
-                "part": "ОГРАНИЧЕНИЯ",
-                "handler": "_handle_format"
-            }
-        ]
-    
-    def get_question(self, question_id: int) -> Optional[Dict]:
-        """Получить вопрос по ID"""
-        for question in self.questions:
-            if question["id"] == question_id:
-                return question
-        return None
-    
-    def get_next_question(self, current_id: int) -> Optional[Dict]:
-        """Получить следующий вопрос"""
-        for question in self.questions:
-            if question["id"] > current_id:
-                return question
-        return None
-    
-    async def ask_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession):
-        """Задать следующий вопрос"""
-        question = self.get_next_question(session.current_question)
-        
-        if not question:
-            # Вопросы закончились
-            await self._finish_questionnaire(update, context, session)
-            return
-        
-        session.current_question = question["id"]
-        
-        # Формируем текст вопроса
-        header = self.ux.get_progress_header(session)
-        praise = self.ux.get_random_praise()
-        question_text = f"{praise}\n\n{header}{question['text']}"
-        
-        # Создаем клавиатуру
-        reply_markup = None
-        if question["type"] != QuestionType.TEXT:
-            reply_markup = self.ux.create_question_keyboard(
-                question["type"], 
-                question.get("options")
-            )
-        
-        # Отправляем вопрос
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                question_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        else:
-            await update.message.reply_text(
-                question_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-    
-    async def _finish_questionnaire(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession):
-        """Завершить вопросник и начать анализ"""
-        session.current_state = BotState.ANALYZING
-        
-        praise = self.ux.get_random_praise()
-        
-        finish_text = f"""🎉 *БРАВО! АНКЕТА ЗАВЕРШЕНА!*
-
-{praise}
-
-✅ Отвечено: {session.questions_answered} вопросов
-⏱️ Время заполнения: ~{(datetime.now() - session.start_time).seconds // 60} минут
-🎯 Глубина анализа: профессиональный уровень
-
-🤖 *Запускаю AI-анализ...*
-1. Анализирую психологический профиль
-2. Ищу скрытый потенциал  
-3. Подбираю уникальные ниши
-4. Готовлю персонализированные планы
-
-⏳ *Это займет 1-2 минуты*
-Пока AI работает, можете отдохнуть ☕"""
-        
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                finish_text,
-                parse_mode='Markdown'
-            )
-        else:
-            await update.message.reply_text(
-                finish_text,
-                parse_mode='Markdown'
-            )
-        
-        # Сохраняем сессию
-        context.bot_data['data_manager'].save_session(session.user_id)
-        context.bot_data['data_manager'].mark_profile_completed(session.user_id)
-        
-        # Запускаем AI анализ
-        await self._start_ai_analysis(update, context, session)
-    
-    async def _start_ai_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession):
-        """Запустить AI анализ"""
-        openai_service = context.bot_data['openai_service']
-        
-        # Показываем прогресс
-        progress_msg = await context.bot.send_message(
-            chat_id=session.chat_id,
-            text="🧠 *AI АНАЛИЗ: 1/3 - Психологический профиль*\n\n"
-                 "Анализирую ваши ответы...\n"
-                 "⏱️ *Примерное время:* 30-45 секунд\n\n"
-                 "🔍 *Что анализирую:*\n"
-                 "• Личностные характеристики\n"
-                 "• Скрытый потенциал\n"
-                 "• Идеальные условия для бизнеса",
-            parse_mode='Markdown'
-        )
-        
-        try:
-            # 1. Генерация психологического анализа
-            analysis = await openai_service.generate_psychological_analysis(session)
-            
-            if analysis:
-                session.psychological_analysis = analysis
-                
-                # Обновляем прогресс
-                await progress_msg.edit_text(
-                    "🧠 *AI АНАЛИЗ: 2/3 - Поиск бизнес-ниш*\n\n"
-                    "Подбираю персонализированные ниши...\n"
-                    "⏱️ *Примерное время:* 45-60 секунд\n\n"
-                    "🎯 *Что ищу:*\n"
-                    "• Быстрый старт (первые деньги за 1-2 месяца)\n"
-                    "• Сбалансированные варианты\n"
-                    "• Долгосрочные проекты\n"
-                    "• Рискованные и скрытые ниши",
-                    parse_mode='Markdown'
-                )
-                
-                # 2. Генерация бизнес-ниш
-                niches = await openai_service.generate_business_niches(session, analysis)
-                session.generated_niches = niches
-                
-                # 3. Генерация планов для первых 3 ниш
-                await progress_msg.edit_text(
-                    "🧠 *AI АНАЛИЗ: 3/3 - Детальные планы*\n\n"
-                    "Разрабатываю пошаговые стратегии...\n"
-                    "⏱️ *Примерное время:* 60-90 секунд\n\n"
-                    "📋 *Что создаю:*\n"
-                    "• Психологическую подготовку\n"
-                    "• 30-дневный план запуска\n"
-                    "• Финансовую дорожную карту\n"
-                    "• Метрики успеха и ресурсы",
-                    parse_mode='Markdown'
-                )
-                
-                # Генерируем планы для первых 3 ниш
-                plans_generated = 0
-                for i, niche in enumerate(session.generated_niches[:3]):
-                    plan = await openai_service.generate_detailed_plan(session, niche)
-                    if plan:
-                        session.detailed_plans[niche.id] = plan
-                        plans_generated += 1
-                    
-                    # Обновляем прогресс
-                    if i < 2:
-                        await progress_msg.edit_text(
-                            f"🧠 *AI АНАЛИЗ: 3/3 - Детальные планы*\n\n"
-                            f"Создаю план {i+1}/3...\n"
-                            f"⏱️ *Примерное время:* {(i+1)*30} секунд",
-                            parse_mode='Markdown'
-                        )
-                
-                # Удаляем сообщение о прогрессе
-                await progress_msg.delete()
-                
-                # Показываем результат
-                stats = context.bot_data['data_manager'].openai_usage
-                stats_text = stats.get_stats_str() if stats.total_requests > 0 else ""
-                
-                result_text = f"""🎉 *АНАЛИЗ ЗАВЕРШЕН!*
-
-✅ Создано: {len(session.generated_niches)} уникальных бизнес-ниш
-📊 Психологический портрет: готов
-📋 Детальные планы: {plans_generated} шт
-
-{stats_text}
-
-👇 *Выберите первую нишу для изучения:*"""
-                
-                await context.bot.send_message(
-                    chat_id=session.chat_id,
-                    text=result_text,
-                    parse_mode='Markdown'
-                )
-                
-                session.current_state = BotState.NICHE_SELECTION
-                await self._show_first_niche(update, context, session)
-                
-            else:
-                # Ошибка генерации анализа
-                await progress_msg.delete()
-                await context.bot.send_message(
-                    chat_id=session.chat_id,
-                    text="❌ *Ошибка генерации анализа*\n\n"
-                         "Не удалось сгенерировать психологический анализ. "
-                         "Пожалуйста, попробуйте начать заново /start",
-                    parse_mode='Markdown'
-                )
-                session.current_state = BotState.START
-                
-        except Exception as e:
-            logger.error(f"❌ Ошибка AI анализа: {e}")
-            await progress_msg.delete()
-            
-            # Пробуем использовать запасные данные
-            await self._use_fallback_data(update, context, session)
-    
-    async def _use_fallback_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession):
-        """Использовать запасные данные"""
-        openai_service = context.bot_data['openai_service']
-        
-        # Создаем запасной анализ
-        session.psychological_analysis = PsychologicalAnalysis(
-            demographic_insights="Базовый анализ на основе ваших ответов.",
-            personality_profile="Практичный подход с творческим потенциалом.",
-            hidden_potential="Комбинация аналитических и коммуникативных навыков.",
-            ideal_conditions="Гибридный формат работы с умеренным темпом роста.",
-            age_specific_recommendations="",
-            location_opportunities=""
-        )
-        
-        # Создаем запасные ниши
-        session.generated_niches = openai_service._create_fallback_niches(session)
-        
-        result_text = f"""🎉 *АНАЛИЗ ЗАВЕРШЕН (базовый режим)*
-
-✅ Создано: {len(session.generated_niches)} бизнес-ниш
-📊 Использованы стандартные шаблоны
-⚠️ AI временно недоступен
-
-👇 *Выберите первую нишу для изучения:*"""
-        
-        await context.bot.send_message(
-            chat_id=session.chat_id,
-            text=result_text,
-            parse_mode='Markdown'
-        )
-        
-        session.current_state = BotState.NICHE_SELECTION
-        await self._show_first_niche(update, context, session)
-    
-    async def _show_first_niche(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession):
-        """Показать первую нишу"""
-        if not session.generated_niches:
-            await context.bot.send_message(
-                chat_id=session.chat_id,
-                text="❌ Ниши не сгенерированы. Попробуйте начать заново /start",
-                parse_mode='Markdown'
-            )
-            return
-        
-        # Сбрасываем индекс для навигации
-        session.current_question = len(self.questions) + 1
-        
-        niche = session.generated_niches[0]
-        niche_text = self.ux.format_niche_for_display(niche, 1, len(session.generated_niches))
-        
-        keyboard = self.ux.create_navigation_keyboard(session)
-        
-        await context.bot.send_message(
-            chat_id=session.chat_id,
-            text=niche_text,
-            reply_markup=keyboard,
-            parse_mode='Markdown'
-        )
-    
-    async def handle_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
-                           session: UserSession, question_id: int, answer_data: Any):
-        """Обработать ответ на вопрос"""
-        question = self.get_question(question_id)
-        if not question:
-            logger.error(f"Вопрос {question_id} не найден")
-            return
-        
-        handler_name = question.get("handler")
-        if not handler_name:
-            logger.error(f"Хендлер для вопроса {question_id} не указан")
-            return
-        
-        # Вызываем соответствующий обработчик
-        handler = getattr(self, handler_name, None)
-        if handler:
-            await handler(update, context, session, answer_data)
-        else:
-            logger.error(f"Хендлер {handler_name} не найден")
-        
-        # Переходим к следующему вопросу
-        await self.ask_question(update, context, session)
-    
-    # Обработчики ответов
-    async def _handle_age(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
-                         session: UserSession, answer_data: str):
-        """Обработка возраста"""
-        age_map = {
-            'age_18-25': '18-25 лет',
-            'age_26-35': '26-35 лет',
-            'age_36-45': '36-45 лет',
-            'age_46+': '46+ лет'
-        }
-        
-        session.demographics.age_group = age_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_education(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                              session: UserSession, answer_data: str):
-        """Обработка образования"""
-        edu_map = {
-            'edu_school': 'Среднее',
-            'edu_college': 'Среднее специальное',
-            'edu_incomplete': 'Неоконченное высшее',
-            'edu_bachelor': 'Высшее (бакалавр)',
-            'edu_master': 'Высшее (магистр/специалист)',
-            'edu_multiple': 'Два и более высших',
-            'edu_mba': 'MBA/аспирантура',
-            'edu_self': 'Самообразование (курсы, самоучка)'
-        }
-        
-        session.demographics.education = edu_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_location_type(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                  session: UserSession, answer_data: str):
-        """Обработка типа локации"""
-        if answer_data == 'loc_custom':
-            # Пользователь напишет сам
-            session.current_question = 3  # Остаемся на том же вопросе
-            return
-        
-        loc_map = {
-            'loc_moscow': 'Москва',
-            'loc_spb': 'Санкт-Петербург',
-            'loc_million': 'Город-миллионник',
-            'loc_region': 'Областной центр',
-            'loc_small': 'Малый город',
-            'loc_village': 'Село/деревня'
-        }
-        
-        session.demographics.location_type = loc_map.get(answer_data, 'Не указано')
-        session.demographics.location = session.demographics.location_type
-        session.questions_answered += 1
-    
-    async def _handle_location_custom(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                    session: UserSession, answer_data: str):
-        """Обработка кастомной локации"""
-        session.demographics.location_custom = answer_data
-        session.demographics.location = answer_data
-        session.questions_answered += 1
-    
-    async def _handle_motivation(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                               session: UserSession, answer_data: str):
-        """Обработка мотивации"""
-        if answer_data == 'multiselect_done':
-            # Проверяем количество выбранных вариантов
-            selected = session.temp_multiselect
-            question = self.get_question(session.current_question)
-            
-            min_sel = question.get('min_selections', 0)
-            max_sel = question.get('max_selections', 999)
-            
-            if min_sel <= len(selected) <= max_sel:
-                mot_map = {
-                    'mot_freedom': 'Свобода и независимость',
-                    'mot_money': 'Стабильный высокий доход',
-                    'mot_help': 'Помощь людям, социальная значимость',
-                    'mot_creative': 'Творческая реализация, самовыражение',
-                    'mot_challenge': 'Решение интересных вызовов, азарт',
-                    'mot_status': 'Признание, статус',
-                    'mot_balance': 'Баланс работы и жизни',
-                    'mot_legacy': 'Наследие, долгосрочный проект'
-                }
-                
-                session.personality.motivations = [mot_map.get(m, m) for m in selected]
-                session.temp_multiselect = []
-                session.questions_answered += 1
-            else:
-                # Сообщаем об ошибке
-                if update.callback_query:
-                    await update.callback_query.answer(
-                        f"❌ Пожалуйста, выберите {min_sel}-{max_sel} вариантов",
-                        show_alert=True
-                    )
-                return
-        else:
-            # Добавляем или удаляем выбранный вариант
-            mot_id = answer_data.replace('select_', '')
-            if mot_id in session.temp_multiselect:
-                session.temp_multiselect.remove(mot_id)
-            else:
-                session.temp_multiselect.append(mot_id)
-            
-            # Обновляем сообщение
-            await self._update_multiselect_message(update, session)
-    
-    async def _update_multiselect_message(self, update: Update, session: UserSession):
-        """Обновить сообщение с мультиселектом"""
-        question = self.get_question(session.current_question)
-        if not question:
-            return
-        
-        header = self.ux.get_progress_header(session)
-        praise = self.ux.get_random_praise()
-        question_text = f"{praise}\n\n{header}{question['text']}"
-        
-        # Добавляем информацию о выбранных
-        selected_count = len(session.temp_multiselect)
-        question_text += f"\n\n✅ Выбрано: {selected_count}"
-        
-        # Создаем обновленную клавиатуру
-        keyboard = []
-        for option in question.get('options', []):
-            if isinstance(option, tuple):
-                text, callback_data = option
-                if callback_data in session.temp_multiselect:
-                    keyboard.append([InlineKeyboardButton(f"✅ {text}", callback_data=f"select_{callback_data}")])
-                else:
-                    keyboard.append([InlineKeyboardButton(f"□ {text}", callback_data=f"select_{callback_data}")])
-        
-        keyboard.append([InlineKeyboardButton("✅ Завершить выбор", callback_data="multiselect_done")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        if update.callback_query:
-            await update.callback_query.edit_message_text(
-                question_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-    
-    async def _handle_decision_style(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                   session: UserSession, answer_data: str):
-        """Обработка стиля решений"""
-        dec_map = {
-            'dec_feelings': 'Сначала чувства и эмоции, потом логика',
-            'dec_logic': 'Сначала логика и факты, потом чувства',
-            'dec_advice': 'Советуюсь с близкими/экспертами',
-            'dec_table': 'Составляю таблицу плюсов/минусов',
-            'dec_fast': 'Выбираю то, что быстрее принесет результат'
-        }
-        
-        session.personality.decision_style = dec_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_risk_scenario(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                  session: UserSession, answer_data: str):
-        """Обработка сценария риска"""
-        risk_map = {
-            'risk_safe': 'Только на проверенные инвестиции (<10% годовых)',
-            'risk_learning': 'На обучение/развитие навыков',
-            'risk_business': 'На запуск своего небольшого дела',
-            'risk_startup': 'На рискованный, но перспективный стартап'
-        }
-        
-        session.personality.risk_scenario = risk_map.get(answer_data, 'Не указано')
-        # Не увеличиваем счетчик - следующий вопрос часть того же
-        # session.questions_answered += 1
-    
-    async def _handle_risk_level(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                               session: UserSession, answer_data: str):
-        """Обработка уровня риска"""
-        if answer_data.startswith('slider_'):
-            if answer_data == 'slider_confirm':
-                session.questions_answered += 1
-            else:
-                try:
-                    level = int(answer_data.split('_')[1])
-                    session.personality.risk_tolerance = level
-                except:
-                    pass
-        else:
-            session.questions_answered += 1
-    
-    async def _handle_energy_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                   session: UserSession, answer_data: str):
-        """Обработка энергетического профиля"""
-        # Для простоты берем первое число из текста
-        import re
-        numbers = re.findall(r'\d+', answer_data)
-        if len(numbers) >= 3:
-            try:
-                session.personality.energy_profile.morning = min(7, max(1, int(numbers[0])))
-                session.personality.energy_profile.day = min(7, max(1, int(numbers[1])))
-                session.personality.energy_profile.evening = min(7, max(1, int(numbers[2])))
-                session.questions_answered += 1
-            except:
-                session.questions_answered += 1
-        else:
-            session.questions_answered += 1
-    
-    async def _handle_peak_hours(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                               session: UserSession, answer_data: str):
-        """Обработка пиковых часов"""
-        # Этот обработчик сложнее, требует контекста
-        # Для упрощения пропускаем
-        session.questions_answered += 1
-    
-    async def _handle_fears_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                 session: UserSession, answer_data: str):
-        """Обработка выбора страхов"""
-        if answer_data == 'multiselect_done':
-            selected = session.temp_multiselect
-            question = self.get_question(session.current_question)
-            
-            min_sel = question.get('min_selections', 0)
-            max_sel = question.get('max_selections', 999)
-            
-            if min_sel <= len(selected) <= max_sel:
-                fear_map = {
-                    'fear_financial': 'Финансовая нестабильность',
-                    'fear_technical': 'Не справиться технически',
-                    'fear_failure': 'Провал, осуждение близких',
-                    'fear_burnout': 'Выгорание, потеря интереса',
-                    'fear_legal': 'Юридические проблемы',
-                    'fear_clients': 'Не найти клиентов',
-                    'fear_competition': 'Конкуренция'
-                }
-                
-                session.personality.fears_selected = [fear_map.get(f, f) for f in selected]
-                session.temp_multiselect = []
-                session.questions_answered += 1
-            else:
-                if update.callback_query:
-                    await update.callback_query.answer(
-                        f"❌ Пожалуйста, выберите {min_sel}-{max_sel} вариантов",
-                        show_alert=True
-                    )
-                return
-        else:
-            fear_id = answer_data.replace('select_', '')
-            if fear_id in session.temp_multiselect:
-                session.temp_multiselect.remove(fear_id)
-            else:
-                session.temp_multiselect.append(fear_id)
-            
-            await self._update_multiselect_message(update, session)
-    
-    async def _handle_fear_custom(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                session: UserSession, answer_data: str):
-        """Обработка кастомного страха"""
-        session.personality.fear_custom = answer_data
-        session.questions_answered += 1
-    
-    async def _handle_skill_rating(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                 session: UserSession, answer_data: str):
-        """Обработка оценки навыка"""
-        question = self.get_question(session.current_question)
-        skill_name = question.get('skill')
-        
-        if answer_data.startswith('slider_'):
-            if answer_data == 'slider_confirm':
-                session.questions_answered += 1
-            else:
-                try:
-                    level = int(answer_data.split('_')[1])
-                    if skill_name:
-                        setattr(session.skills, skill_name, level)
-                except:
-                    pass
-        else:
-            session.questions_answered += 1
-    
-    async def _handle_superpower(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                               session: UserSession, answer_data: str):
-        """Обработка суперсилы"""
-        power_map = {
-            'power_vision': 'Предвидение трендов и возможностей',
-            'power_persuasion': 'Умение убеждать и вдохновлять',
-            'power_engineering': 'Решение сложных технических проблем',
-            'power_creation': 'Создание красивых и функциональных вещей',
-            'power_insight': 'Понимание скрытых мотивов людей',
-            'power_energy': 'Могу работать сутками на энтузиазме'
-        }
-        
-        session.skills.superpower = power_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_work_style(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                               session: UserSession, answer_data: str):
-        """Обработка стиля работы"""
-        work_map = {
-            'work_alone': 'В одиночку - полный контроль',
-            'work_pair': 'В паре - взаимодополнение',
-            'work_team': 'В команде 3-5 человек',
-            'work_structure': 'В структуре с четкими ролями',
-            'work_remote': 'Удаленно, с периодическими встречами',
-            'work_flexible': 'Гибко - меняю форматы под задачи'
-        }
-        
-        session.skills.work_style = work_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_learning_style(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                   session: UserSession, answer_data: str):
-        """Обработка стиля обучения"""
-        # Для простоты сохраняем как текст
-        session.skills.learning_preferences['custom'] = answer_data
-        session.questions_answered += 1
-    
-    async def _handle_existential(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                session: UserSession, answer_data: str):
-        """Обработка экзистенциального вопроса"""
-        session.values.existential_answer = answer_data
-        session.questions_answered += 1
-    
-    async def _handle_flow_experience(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                    session: UserSession, answer_data: str):
-        """Обработка опыта потока"""
-        session.values.flow_experience_desc = answer_data
-        session.questions_answered += 1
-    
-    async def _handle_flow_feelings(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                  session: UserSession, answer_data: str):
-        """Обработка ощущений в потоке"""
-        session.values.flow_feelings = answer_data
-        session.questions_answered += 1
-    
-    async def _handle_client_age(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                               session: UserSession, answer_data: str):
-        """Обработка возраста клиента"""
-        age_map = {
-            'client_20-30': '20-30 лет',
-            'client_30-40': '30-40 лет',
-            'client_40-50': '40-50 лет',
-            'client_50+': '50+ лет'
-        }
-        
-        session.values.ideal_client_age = age_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_client_field(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                 session: UserSession, answer_data: str):
-        """Обработка сферы клиента"""
-        field_map = {
-            'field_it': 'IT/Технологии',
-            'field_creative': 'Творчество/Дизайн',
-            'field_business': 'Бизнес/Предпринимательство',
-            'field_education': 'Образование',
-            'field_health': 'Здоровье/Красота',
-            'field_other': 'Другое'
-        }
-        
-        session.values.ideal_client_field = field_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_client_pain(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                session: UserSession, answer_data: str):
-        """Обработка боли клиента"""
-        pain_map = {
-            'pain_time': 'Не хватает времени',
-            'pain_system': 'Нет системности',
-            'pain_expertise': 'Нет экспертизы',
-            'pain_clients': 'Нет клиентов',
-            'pain_money': 'Не хватает денег'
-        }
-        
-        session.values.ideal_client_pain = pain_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_client_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                                   session: UserSession, answer_data: str):
-        """Обработка деталей о клиенте"""
-        session.values.ideal_client_details = answer_data
-        session.questions_answered += 1
-    
-    async def _handle_budget(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                           session: UserSession, answer_data: str):
-        """Обработка бюджета"""
-        budget_map = {
-            'budget_50k': '< 50,000₽',
-            'budget_200k': '50,000-200,000₽',
-            'budget_500k': '200,000-500,000₽',
-            'budget_more': '> 500,000₽'
-        }
-        
-        session.limitations.budget = budget_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_equipment(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                              session: UserSession, answer_data: str):
-        """Обработка оборудования"""
-        if answer_data == 'multiselect_done':
-            selected = session.temp_multiselect
-            equip_map = {
-                'equip_computer': 'Компьютер/ноутбук',
-                'equip_camera': 'Камера/фотоаппарат',
-                'equip_tools': 'Специнструменты',
-                'equip_space': 'Помещение/мастерская'
-            }
-            
-            session.limitations.equipment = [equip_map.get(e, e) for e in selected]
-            session.temp_multiselect = []
-            session.questions_answered += 1
-        else:
-            equip_id = answer_data.replace('select_', '')
-            if equip_id in session.temp_multiselect:
-                session.temp_multiselect.remove(equip_id)
-            else:
-                session.temp_multiselect.append(equip_id)
-            
-            await self._update_multiselect_message(update, session)
-    
-    async def _handle_knowledge(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                              session: UserSession, answer_data: str):
-        """Обработка знаний"""
-        if answer_data == 'multiselect_done':
-            selected = session.temp_multiselect
-            know_map = {
-                'know_connections': 'Профессиональные связи',
-                'know_expertise': 'Уникальная экспертиза',
-                'know_info': 'Доступ к информации',
-                'know_brand': 'Личный бренд/аудитория'
-            }
-            
-            session.limitations.knowledge_assets = [know_map.get(k, k) for k in selected]
-            session.temp_multiselect = []
-            session.questions_answered += 1
-        else:
-            know_id = answer_data.replace('select_', '')
-            if know_id in session.temp_multiselect:
-                session.temp_multiselect.remove(know_id)
-            else:
-                session.temp_multiselect.append(know_id)
-            
-            await self._update_multiselect_message(update, session)
-    
-    async def _handle_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                         session: UserSession, answer_data: str):
-        """Обработка времени"""
-        time_map = {
-            'time_5-10': '5-10 часов (параллельно с работой)',
-            'time_10-20': '10-20 часов (серьезный side-project)',
-            'time_20-30': '20-30 часов (почти полный день)',
-            'time_30-40': '30-40 часов (можно погрузиться)',
-            'time_40+': '40+ часов (готов(а) работать сутками)'
-        }
-        
-        session.limitations.time_per_week = time_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_scale(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                          session: UserSession, answer_data: str):
-        """Обработка масштаба"""
-        scale_map = {
-            'scale_local': 'Локальный (район/город)',
-            'scale_region': 'Региональный (область)',
-            'scale_national': 'Национальный (Россия)',
-            'scale_international': 'Международный',
-            'scale_online': 'Онлайн-глобальный'
-        }
-        
-        session.limitations.business_scale = scale_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
-    
-    async def _handle_format(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
-                           session: UserSession, answer_data: str):
-        """Обработка формата"""
-        format_map = {
-            'format_online': 'Только онлайн',
-            'format_offline': 'Только офлайн',
-            'format_hybrid': 'Гибрид (онлайн + офлайн)'
-        }
-        
-        session.limitations.business_format = format_map.get(answer_data, 'Не указано')
-        session.questions_answered += 1
+        return InlineKeyboardMarkup(keyboard) if keyboard else None
 
 # ==================== ОСНОВНОЙ КЛАСС БОТА ====================
 class BusinessNavigatorBot:
@@ -2545,15 +1136,13 @@ class BusinessNavigatorBot:
     
     def __init__(self):
         self.config = BotConfig()
-        self.data_manager = BotDataManager()
+        self.data_manager = DataManager()
         self.ux_manager = UXManager(self.config)
-        self.questionnaire = QuestionnaireManager(self.ux_manager)
-        self.openai_service = OpenAIService(self.config, self.data_manager)
+        self.openai_service = OpenAIService(self.config)
         
         # Инициализация приложения Telegram
         self.application = Application.builder() \
             .token(self.config.telegram_token) \
-            .persistence(PicklePersistence(filepath="bot_data.pickle")) \
             .build()
         
         # Регистрация обработчиков
@@ -2570,7 +1159,7 @@ class BusinessNavigatorBot:
         self.application.add_handler(CommandHandler("restart", self.restart_command))
         
         # Обработчики callback-запросов
-        self.application.add_handler(CallbackQueryHandler(self.handle_callback_query, pattern=None))
+        self.application.add_handler(CallbackQueryHandler(self.handle_callback_query))
         
         # Обработчики текстовых сообщений
         self.application.add_handler(MessageHandler(
@@ -2602,6 +1191,7 @@ class BusinessNavigatorBot:
         session.current_state = BotState.START
         session.current_question = 0
         session.questions_answered = 0
+        session.selected_niche_index = 0
         session.start_time = datetime.now()
         session.update_activity()
         
@@ -2611,15 +1201,13 @@ class BusinessNavigatorBot:
         welcome_text = f"""👋 *Добро пожаловать в Бизнес-Навигатор v7.0!* {ai_status}
 
 🎯 *Что вас ждет:*
-• 34 вопроса для глубокого анализа личности
+• 18 вопросов для глубокого анализа личности
 • Психологический портрет от AI
 • 8 персонализированных бизнес-ниш
 • Детальные пошаговые планы
 
 📊 *Статистика бота:*
 {self.data_manager.stats.get_stats_str()}
-
-{self.data_manager.openai_usage.get_stats_str() if self.data_manager.openai_usage.total_requests > 0 else ''}
 
 👇 *Нажмите кнопку ниже, чтобы начать анализ:*"""
         
@@ -2635,7 +1223,6 @@ class BusinessNavigatorBot:
         # Сохраняем менеджеры в контексте
         context.bot_data['data_manager'] = self.data_manager
         context.bot_data['openai_service'] = self.openai_service
-        context.bot_data['questionnaire'] = self.questionnaire
         context.bot_data['ux_manager'] = self.ux_manager
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2649,7 +1236,7 @@ class BusinessNavigatorBot:
 /help - Эта справка
 
 *Процесс анализа:*
-1. Заполните анкету (34 вопроса)
+1. Заполните анкету (18 вопросов)
 2. AI анализирует ваш профиль
 3. Получите 8 персонализированных бизнес-ниш
 4. Выберите нишу для детального плана
@@ -2658,13 +1245,7 @@ class BusinessNavigatorBot:
 • Будьте честны в ответах
 • Не торопитесь, обдумайте каждый вопрос
 • Отвечайте максимально подробно
-• Используйте все возможности AI-анализа
-
-*Техническая поддержка:*
-Если возникли проблемы, попробуйте:
-1. Перезапустить бота /restart
-2. Проверить подключение к интернету
-3. Подождать несколько минут"""
+• Используйте все возможности AI-анализа"""
         
         await update.message.reply_text(help_text, parse_mode='Markdown')
     
@@ -2676,8 +1257,7 @@ class BusinessNavigatorBot:
 
 {self.data_manager.openai_usage.get_stats_str() if self.data_manager.openai_usage.total_requests > 0 else ''}
 
-*Активные сессии:* {len(self.data_manager.user_sessions)}
-*Кэшировано сессий:* {len(list(self.data_manager.cache_dir.glob('user_*.json')))}"""
+*Активные сессии:* {len(self.data_manager.user_sessions)}"""
         
         await update.message.reply_text(stats_text, parse_mode='Markdown')
     
@@ -2687,7 +1267,7 @@ class BusinessNavigatorBot:
         
         if user_id in self.data_manager.user_sessions:
             # Сохраняем старую сессию
-            self.data_manager.save_session(user_id)
+            self.data_manager.save_session(self.data_manager.user_sessions[user_id])
             # Удаляем из активных
             del self.data_manager.user_sessions[user_id]
             self.data_manager.stats.active_sessions -= 1
@@ -2707,7 +1287,7 @@ class BusinessNavigatorBot:
         user_id = query.from_user.id
         callback_data = query.data
         
-        # Получаем или создаем сессию
+        # Получаем сессию
         session = self.data_manager.get_or_create_session(
             user_id=user_id,
             chat_id=query.message.chat_id,
@@ -2716,78 +1296,1000 @@ class BusinessNavigatorBot:
             last_name=query.from_user.last_name
         )
         
-        # Обрабатываем callback
+        # Обработка callback в зависимости от состояния
+        if session.current_state == BotState.START:
+            await self._handle_start_state(query, session, callback_data)
+        elif session.current_state in [BotState.DEMOGRAPHY, BotState.PERSONALITY, 
+                                      BotState.SKILLS, BotState.VALUES, BotState.LIMITATIONS]:
+            await self._handle_questionnaire_state(query, context, session, callback_data)
+        elif session.current_state == BotState.NICHE_SELECTION:
+            await self._handle_niche_selection_state(query, context, session, callback_data)
+        elif session.current_state == BotState.DETAILED_PLAN:
+            await self._handle_detailed_plan_state(query, context, session, callback_data)
+        elif session.current_state == BotState.PSYCH_ANALYSIS:
+            await self._handle_psych_analysis_state(query, context, session, callback_data)
+    
+    async def _handle_start_state(self, query, session, callback_data):
+        """Обработка состояния START"""
         if callback_data == 'start_questionnaire':
-            await self._start_questionnaire(query, session)
+            session.current_state = BotState.DEMOGRAPHY
+            session.current_question = 1
+            await self._ask_question(query, session, 1)
+    
+    async def _handle_questionnaire_state(self, query, context, session, callback_data):
+        """Обработка состояний вопросника"""
+        question_num = session.current_question
         
-        elif callback_data.startswith('niche_'):
-            await self._handle_niche_navigation(query, context, session, callback_data)
-        
+        if callback_data.startswith('select_'):
+            # Мультиселект
+            selected_id = callback_data.replace('select_', '')
+            if selected_id in session.temp_multiselect:
+                session.temp_multiselect.remove(selected_id)
+            else:
+                session.temp_multiselect.append(selected_id)
+            
+            await self._update_multiselect_message(query, session, question_num)
+            
+        elif callback_data == 'multiselect_done':
+            await self._handle_multiselect_done(query, session, question_num)
+            
+        elif callback_data.startswith('slider_'):
+            if callback_data == 'slider_confirm':
+                await self._handle_slider_confirm(query, session, question_num)
+            else:
+                value = int(callback_data.split('_')[1])
+                await self._handle_slider_value(query, session, question_num, value)
+                
+        elif callback_data.startswith('energy_'):
+            await self._handle_energy_selection(query, session, callback_data)
+            
+        elif callback_data.startswith('peak_'):
+            await self._handle_peak_selection(query, session, callback_data)
+            
+        else:
+            # Обычная кнопка
+            await self._handle_button_answer(query, context, session, question_num, callback_data)
+    
+    async def _handle_niche_selection_state(self, query, context, session, callback_data):
+        """Обработка состояния NICHE_SELECTION"""
+        if callback_data == 'niche_prev':
+            if session.selected_niche_index > 0:
+                session.selected_niche_index -= 1
+                await self._show_current_niche(query, session)
+                
+        elif callback_data == 'niche_next':
+            if session.selected_niche_index < len(session.generated_niches) - 1:
+                session.selected_niche_index += 1
+                await self._show_current_niche(query, session)
+                
         elif callback_data.startswith('plan_'):
-            await self._handle_plan_request(query, context, session, callback_data)
-        
+            await self._show_detailed_plan(query, context, session, callback_data)
+            
         elif callback_data == 'show_analysis':
-            await self._show_analysis(query, context, session)
-        
+            await self._show_psych_analysis(query, context, session)
+            
         elif callback_data == 'save_all':
             await self._save_all_data(query, context, session)
-        
+            
         elif callback_data == 'start_over':
-            await self._start_over(query, context, session)
-        
+            await self._start_over(query, session)
+            
         elif callback_data == 'show_stats':
             await self._show_stats(query, context)
-        
-        else:
-            # Обработка ответов на вопросы
-            await self._handle_question_answer(query, context, session, callback_data)
     
-    async def _start_questionnaire(self, query, session):
-        """Начать вопросник"""
-        session.current_state = BotState.DEMOGRAPHY
-        session.current_question = 0
-        session.questions_answered = 0
-        
-        await self.questionnaire.ask_question(None, query, session)
+    async def _handle_detailed_plan_state(self, query, context, session, callback_data):
+        """Обработка состояния DETAILED_PLAN"""
+        if callback_data == 'back_to_niches':
+            session.current_state = BotState.NICHE_SELECTION
+            await self._show_current_niche(query, session)
+            
+        elif callback_data.startswith('save_plan_'):
+            await query.answer("✅ План сохранен в истории чата!", show_alert=True)
     
-    async def _handle_niche_navigation(self, query, context, session, callback_data):
-        """Навигация по нишам"""
-        if not session.generated_niches:
-            await query.answer("❌ Ниши не сгенерированы", show_alert=True)
-            return
+    async def _handle_psych_analysis_state(self, query, context, session, callback_data):
+        """Обработка состояния PSYCH_ANALYSIS"""
+        if callback_data == 'back_to_niches':
+            session.current_state = BotState.NICHE_SELECTION
+            await self._show_current_niche(query, session)
+    
+    async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик текстовых сообщений"""
+        user_id = update.effective_user.id
+        message_text = update.message.text
         
-        current_idx = session.current_question - len(self.questionnaire.questions) - 1
-        if current_idx < 0:
-            current_idx = 0
+        # Увеличиваем счетчик сообщений
+        self.data_manager.increment_messages()
         
-        if callback_data == 'niche_prev' and current_idx > 0:
-            current_idx -= 1
-        elif callback_data == 'niche_next' and current_idx < len(session.generated_niches) - 1:
-            current_idx += 1
-        
-        session.current_question = len(self.questionnaire.questions) + current_idx + 1
-        
-        niche = session.generated_niches[current_idx]
-        niche_text = self.ux_manager.format_niche_for_display(
-            niche, current_idx + 1, len(session.generated_niches)
+        # Получаем сессию
+        session = self.data_manager.get_or_create_session(
+            user_id=user_id,
+            chat_id=update.message.chat_id,
+            username=update.effective_user.username,
+            first_name=update.effective_user.first_name,
+            last_name=update.effective_user.last_name
         )
         
-        keyboard = self.ux_manager.create_navigation_keyboard(session)
+        # Обработка текстового ответа
+        question_num = session.current_question
+        
+        if question_num == 4 and session.current_state == BotState.DEMOGRAPHY:
+            # Кастомная локация
+            session.location_custom = message_text
+            session.location = message_text
+            session.questions_answered += 1
+            await self._ask_next_question(update, session, 5)
+            
+        elif question_num == 9 and session.current_state == BotState.PERSONALITY:
+            # Энергетический профиль (текст)
+            # Парсим числа из текста
+            import re
+            numbers = re.findall(r'\d+', message_text)
+            if len(numbers) >= 3:
+                try:
+                    session.energy_morning = min(7, max(1, int(numbers[0])))
+                    session.energy_day = min(7, max(1, int(numbers[1])))
+                    session.energy_evening = min(7, max(1, int(numbers[2])))
+                except:
+                    pass
+            session.questions_answered += 1
+            await self._ask_next_question(update, session, 10)
+            
+        elif question_num == 12 and session.current_state == BotState.PERSONALITY:
+            # Кастомный страх
+            session.fear_custom = message_text
+            session.questions_answered += 1
+            await self._ask_next_question(update, session, 13)
+            
+        elif question_num == 21 and session.current_state == BotState.SKILLS:
+            # Стиль обучения
+            session.learning_preferences = message_text
+            session.questions_answered += 1
+            await self._ask_next_question(update, session, 22)
+            
+        elif question_num == 22 and session.current_state == BotState.VALUES:
+            # Экзистенциальный вопрос
+            session.existential_answer = message_text
+            session.questions_answered += 1
+            await self._ask_next_question(update, session, 23)
+            
+        elif question_num == 23 and session.current_state == BotState.VALUES:
+            # Состояние потока
+            session.flow_experience_desc = message_text
+            session.questions_answered += 1
+            await self._ask_next_question(update, session, 24)
+            
+        elif question_num == 24 and session.current_state == BotState.VALUES:
+            # Ощущения в потоке
+            session.flow_feelings = message_text
+            session.questions_answered += 1
+            await self._ask_next_question(update, session, 25)
+            
+        elif question_num == 28 and session.current_state == BotState.VALUES:
+            # Детали о клиенте
+            session.ideal_client_details = message_text
+            session.questions_answered += 1
+            await self._ask_next_question(update, session, 29)
+            
+        else:
+            await update.message.reply_text(
+                "Пожалуйста, используйте кнопки для ответа на текущий вопрос.",
+                parse_mode='Markdown'
+            )
+    
+    async def _ask_question(self, query, session, question_num):
+        """Задать вопрос"""
+        session.current_question = question_num
+        
+        header = self.ux_manager.get_progress_header(session)
+        praise = self.ux_manager.get_random_praise()
+        
+        question_text, keyboard = self._get_question_data(question_num)
+        full_text = f"{praise}\n\n{header}{question_text}"
+        
+        reply_markup = self.ux_manager.create_question_keyboard(keyboard[0], keyboard[1]) if keyboard[1] else None
+        
+        if query:
+            await query.edit_message_text(
+                full_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+    
+    async def _ask_next_question(self, update, session, next_question_num):
+        """Задать следующий вопрос"""
+        session.current_question = next_question_num
+        
+        if next_question_num > session.total_questions:
+            # Все вопросы отвечены
+            await self._finish_questionnaire(update, session)
+            return
+        
+        header = self.ux_manager.get_progress_header(session)
+        praise = self.ux_manager.get_random_praise()
+        
+        question_text, keyboard = self._get_question_data(next_question_num)
+        full_text = f"{praise}\n\n{header}{question_text}"
+        
+        reply_markup = self.ux_manager.create_question_keyboard(keyboard[0], keyboard[1]) if keyboard[1] else None
+        
+        if isinstance(update, Update) and update.message:
+            await update.message.reply_text(
+                full_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        elif hasattr(update, 'callback_query'):
+            await update.callback_query.edit_message_text(
+                full_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+    
+    def _get_question_data(self, question_num: int) -> Tuple[str, Tuple[QuestionType, List]]:
+        """Получить данные вопроса"""
+        questions = {
+            1: (
+                "🔢 *ВОПРОС 1/18: ВАШ ВОЗРАСТ*\n\nВыберите вашу возрастную группу:",
+                (QuestionType.BUTTONS, [
+                    ("18-25 лет", "age_18-25"),
+                    ("26-35 лет", "age_26-35"),
+                    ("36-45 лет", "age_36-45"),
+                    ("46+ лет", "age_46+")
+                ])
+            ),
+            2: (
+                "🎓 *ВОПРОС 2/18: ВАШЕ ОБРАЗОВАНИЕ*\n\nВыберите ваш образовательный уровень:",
+                (QuestionType.BUTTONS, [
+                    ("Среднее", "edu_school"),
+                    ("Среднее специальное", "edu_college"),
+                    ("Неоконченное высшее", "edu_incomplete"),
+                    ("Высшее (бакалавр)", "edu_bachelor"),
+                    ("Высшее (магистр/специалист)", "edu_master"),
+                    ("Два и более высших", "edu_multiple"),
+                    ("MBA/аспирантура", "edu_mba"),
+                    ("Самообразование", "edu_self")
+                ])
+            ),
+            3: (
+                "🏙️ *ВОПРОС 3/18: ВАШ ГОРОД/РЕГИОН*\n\nВыберите тип вашего населенного пункта:",
+                (QuestionType.BUTTONS, [
+                    ("Москва", "loc_moscow"),
+                    ("Санкт-Петербург", "loc_spb"),
+                    ("Город-миллионник", "loc_million"),
+                    ("Областной центр", "loc_region"),
+                    ("Малый город", "loc_small"),
+                    ("Село/деревня", "loc_village"),
+                    ("Другое (напишу)", "loc_custom")
+                ])
+            ),
+            4: (
+                "🏙️ *ВОПРОС 3/18 (продолжение): НАЗВАНИЕ ВАШЕГО ГОРОДА*\n\nНапишите название вашего города или региона:",
+                (QuestionType.TEXT, [])
+            ),
+            5: (
+                "🎯 *ВОПРОС 4/18: КЛЮЧЕВАЯ МОТИВАЦИЯ*\n\nЧто для вас ВАЖНЕЕ ВСЕГО в бизнесе?\nВыберите 2-3 самых важных пункта:",
+                (QuestionType.MULTISELECT, [
+                    ("Свобода и независимость", "mot_freedom"),
+                    ("Стабильный высокий доход", "mot_money"),
+                    ("Помощь людям", "mot_help"),
+                    ("Творческая реализация", "mot_creative"),
+                    ("Решение сложных вызовов", "mot_challenge"),
+                    ("Признание, статус", "mot_status"),
+                    ("Баланс работы и жизни", "mot_balance"),
+                    ("Наследие, долгосрочный проект", "mot_legacy")
+                ])
+            ),
+            6: (
+                "🧩 *ВОПРОС 5/18: СТИЛЬ ПРИНЯТИЯ РЕШЕНИЙ*\n\n*Ситуация:* Нужно выбрать между двумя проектами.\n\nКакой подход вам ближе?",
+                (QuestionType.BUTTONS, [
+                    ("💖 Проект А - нравится интуитивно", "dec_feelings"),
+                    ("📊 Проект Б - больше цифр и аналитики", "dec_logic"),
+                    ("🤝 Посоветуюсь с близкими/экспертами", "dec_advice"),
+                    ("⚖️ Составлю таблицу плюсов/минусов", "dec_table"),
+                    ("🎯 Выберу то, что быстрее принесет результат", "dec_fast")
+                ])
+            ),
+            7: (
+                "🎲 *ВОПРОС 6/18: ОТНОШЕНИЕ К РИСКУ*\n\n*Ситуация:* У вас есть 100,000₽ свободных денег.\n\nНа что готовы их использовать?",
+                (QuestionType.BUTTONS, [
+                    ("🔒 Только на проверенные инвестиции", "risk_safe"),
+                    ("🎓 На обучение/развитие навыков", "risk_learning"),
+                    ("🚀 На запуск своего дела", "risk_business"),
+                    ("🎰 На рискованный стартап", "risk_startup")
+                ])
+            ),
+            8: (
+                "🎲 *ВОПРОС 6/18 (продолжение): УРОВЕНЬ РИСКА*\n\nОцените ваш общий уровень толерантности к риску:\n1 - максимальная осторожность, 10 - готов к высоким рискам",
+                (QuestionType.SLIDER, [])
+            ),
+            9: (
+                "⚡ *ВОПРОС 7/18: ЭНЕРГЕТИЧЕСКИЙ ПРОФИЛЬ*\n\nКак распределяется ваша ЭНЕРГИЯ в течение дня?\n(1 - минимальная энергия, 7 - максимальная)\n\nНапишите три числа через пробел (утро день вечер):",
+                (QuestionType.TEXT, [])
+            ),
+            10: (
+                "⚡ *ВОПРОС 7/18 (продолжение): ПИКОВАЯ ПРОДУКТИВНОСТЬ*\n\nКогда вы наиболее продуктивны для АНАЛИТИЧЕСКОЙ работы?",
+                (QuestionType.BUTTONS, [
+                    ("🌅 Утро", "peak_analytical_morning"),
+                    ("☀️ День", "peak_analytical_day"),
+                    ("🌙 Вечер", "peak_analytical_evening")
+                ])
+            ),
+            11: (
+                "⚡ *ВОПРОС 7/18 (продолжение): ПИКОВАЯ ПРОДУКТИВНОСТЬ*\n\nКогда вы наиболее продуктивны для ТВОРЧЕСКОЙ работы?",
+                (QuestionType.BUTTONS, [
+                    ("🌅 Утро", "peak_creative_morning"),
+                    ("☀️ День", "peak_creative_day"),
+                    ("🌙 Вечер", "peak_creative_evening")
+                ])
+            ),
+            12: (
+                "⚡ *ВОПРОС 7/18 (продолжение): ПИКОВАЯ ПРОДУКТИВНОСТЬ*\n\nКогда вы наиболее продуктивны для ОБЩЕНИЯ С ЛЮДЬМИ?",
+                (QuestionType.BUTTONS, [
+                    ("🌅 Утро", "peak_social_morning"),
+                    ("☀️ День", "peak_social_day"),
+                    ("🌙 Вечер", "peak_social_evening")
+                ])
+            ),
+            13: (
+                "👻 *ВОПРОС 8/18: ГЛУБИННЫЕ СТРАХИ*\n\nЧего вы БОЛЬШЕ ВСЕГО БОИТЕСЬ в бизнесе?\nВыберите 1-2 главных страха:",
+                (QuestionType.MULTISELECT, [
+                    ("Финансовая нестабильность", "fear_financial"),
+                    ("Не справиться технически", "fear_technical"),
+                    ("Провал, осуждение близких", "fear_failure"),
+                    ("Выгорание, потеря интереса", "fear_burnout"),
+                    ("Юридические проблемы", "fear_legal"),
+                    ("Не найти клиентов", "fear_clients"),
+                    ("Конкуренция", "fear_competition")
+                ])
+            ),
+            14: (
+                "👻 *ВОПРОС 8/18 (продолжение): ОПИШИТЕ ВАШ СТРАХ*\n\nА теперь опишите СВОИМИ СЛОВАМИ:\n\"Мой самый большой страх в бизнесе - это...\"",
+                (QuestionType.TEXT, [])
+            ),
+            15: (
+                "🧠 *ВОПРОС 9/18: АНАЛИТИЧЕСКИЕ НАВЫКИ*\n\nОцените ваш уровень аналитики и работы с цифрами:\n(1 - начинающий, 5 - эксперт)",
+                (QuestionType.SLIDER, [])
+            ),
+            16: (
+                "💬 *ВОПРОС 10/18: КОММУНИКАЦИОННЫЕ НАВЫКИ*\n\nОцените ваши навыки общения и переговоров:",
+                (QuestionType.SLIDER, [])
+            ),
+            17: (
+                "🎨 *ВОПРОС 11/18: ТВОРЧЕСКИЕ НАВЫКИ*\n\nОцените ваши навыки дизайна и креативности:",
+                (QuestionType.SLIDER, [])
+            ),
+            18: (
+                "📊 *ВОПРОС 12/18: ОРГАНИЗАЦИОННЫЕ НАВЫКИ*\n\nОцените ваши навыки планирования и организации:",
+                (QuestionType.SLIDER, [])
+            ),
+            19: (
+                "🔧 *ВОПРОС 13/18: НАВЫКИ РУЧНОГО ТРУДА*\n\nОцените ваши навыки работы руками:",
+                (QuestionType.SLIDER, [])
+            ),
+            20: (
+                "❤️ *ВОПРОС 14/18: ЭМОЦИОНАЛЬНЫЙ ИНТЕЛЛЕКТ*\n\nОцените ваш эмоциональный интеллект:",
+                (QuestionType.SLIDER, [])
+            ),
+            21: (
+                "🌟 *ВОПРОС 15/18: ВАША СУПЕРСИЛА*\n\nЕСЛИ БЫ ВЫ БЫЛИ СУПЕРГЕРОЕМ, ваша суперсила была бы:",
+                (QuestionType.BUTTONS, [
+                    ("🔮 ПРЕДВИДЕНИЕ - вижу тренды", "power_vision"),
+                    ("💬 УБЕЖДЕНИЕ - договариваюсь", "power_persuasion"),
+                    ("🔧 ИНЖЕНЕРИЯ - решаю задачи", "power_engineering"),
+                    ("🎨 СОЗИДАНИЕ - создаю красивое", "power_creation"),
+                    ("👁️ ПРОНИКНОВЕНИЕ - понимаю мотивы", "power_insight"),
+                    ("⚡ ЭНЕРГИЯ - работаю на энтузиазме", "power_energy")
+                ])
+            ),
+            22: (
+                "🔄 *ВОПРОС 16/18: РЕЖИМ РАБОТЫ*\n\nКак вы ЛУЧШЕ ВСЕГО РАБОТАЕТЕ?\nВыберите вашу идеальную рабочую среду:",
+                (QuestionType.BUTTONS, [
+                    ("👤 В одиночку", "work_alone"),
+                    ("👥 В паре", "work_pair"),
+                    ("👨‍👩‍👧‍👦 В команде 3-5 человек", "work_team"),
+                    ("🏢 В структуре с ролями", "work_structure"),
+                    ("🌐 Удаленно", "work_remote"),
+                    ("🤸 Гибко - меняю форматы", "work_flexible")
+                ])
+            ),
+            23: (
+                "📚 *ВОПРОС 17/18: СТИЛЬ ОБУЧЕНИЯ*\n\nКак вы лучше всего учитесь новому?\nОпишите одним-двумя предложениями:",
+                (QuestionType.TEXT, [])
+            ),
+            24: (
+                "🌍 *ВОПРОС 18/18: ЭКЗИСТЕНЦИАЛЬНЫЙ ВОПРОС*\n\n*Задание на 2 минуты размышления:*\n\n\"Если бы вам не нужно было зарабатывать деньги и все базовые потребности были бы удовлетворены...\"\n\nЧЕМ БЫ ВЫ ЗАНИМАЛИСЬ?\n(опишите подробно, 3-5 предложений)",
+                (QuestionType.TEXT, [])
+            ),
+            25: (
+                "⏳ *ВОПРОС 18/18 (продолжение): СОСТОЯНИЕ ПОТОКА*\n\nВспомните момент, когда вы полностью погружались в дело и теряли чувство времени:\n\nКакое это было дело? Опишите одним предложением.",
+                (QuestionType.TEXT, [])
+            ),
+            26: (
+                "⏳ *ВОПРОС 18/18 (продолжение): ОЩУЩЕНИЯ В ПОТОКЕ*\n\nТеперь опишите свои ОЩУЩЕНИЯ в тот момент:\n\"Я чувствовал(а)...\" (2-3 предложения)",
+                (QuestionType.TEXT, [])
+            ),
+            27: (
+                "👥 *ВОПРОС 18/18 (продолжение): ИДЕАЛЬНЫЙ КЛИЕНТ*\n\nОпишите человека, с которым вам было бы ИНТЕРЕСНО и ПРИЯТНО работать:\n\nВыберите возрастную группу:",
+                (QuestionType.BUTTONS, [
+                    ("20-30 лет", "client_20-30"),
+                    ("30-40 лет", "client_30-40"),
+                    ("40-50 лет", "client_40-50"),
+                    ("50+ лет", "client_50+")
+                ])
+            ),
+            28: (
+                "👥 *ВОПРОС 18/18 (продолжение): СФЕРА ДЕЯТЕЛЬНОСТИ КЛИЕНТА*\n\nВыберите сферу деятельности вашего идеального клиента:",
+                (QuestionType.BUTTONS, [
+                    ("💻 IT/Технологии", "field_it"),
+                    ("🎨 Творчество/Дизайн", "field_creative"),
+                    ("💼 Бизнес/Предпринимательство", "field_business"),
+                    ("📚 Образование", "field_education"),
+                    ("🏥 Здоровье/Красота", "field_health"),
+                    ("🌿 Другое", "field_other")
+                ])
+            ),
+            29: (
+                "👥 *ВОПРОС 18/18 (продолжение): ГЛАВНАЯ \"БОЛЬ\" КЛИЕНТА*\n\nКакая главная \"боль\" у вашего идеального клиента?",
+                (QuestionType.BUTTONS, [
+                    ("⏰ Не хватает времени", "pain_time"),
+                    ("📊 Нет системности", "pain_system"),
+                    ("🎓 Нет экспертизы", "pain_expertise"),
+                    ("👥 Нет клиентов", "pain_clients"),
+                    ("💰 Не хватает денег", "pain_money")
+                ])
+            ),
+            30: (
+                "👥 *ВОПРОС 18/18 (продолжение): ДЕТАЛИ О КЛИЕНТЕ*\n\nДобавьте деталей одним-двумя предложениями:\n\"Мне нравится работать с людьми, которые...\"",
+                (QuestionType.TEXT, [])
+            ),
+            31: (
+                "🛠️ *ВОПРОС 18/18 (продолжение): РЕСУРСНАЯ КАРТА*\n\nЧто у вас уже есть для старта?\n\n1. ДЕНЬГИ для инвестиций:",
+                (QuestionType.BUTTONS, [
+                    ("< 50,000₽", "budget_50k"),
+                    ("50,000-200,000₽", "budget_200k"),
+                    ("200,000-500,000₽", "budget_500k"),
+                    ("> 500,000₽", "budget_more")
+                ])
+            ),
+            32: (
+                "🛠️ *ВОПРОС 18/18 (продолжение): ОБОРУДОВАНИЕ*\n\nКакое оборудование у вас уже есть?\n(можно выбрать несколько)",
+                (QuestionType.MULTISELECT, [
+                    ("💻 Компьютер/ноутбук", "equip_computer"),
+                    ("📷 Камера/фотоаппарат", "equip_camera"),
+                    ("🔧 Специнструменты", "equip_tools"),
+                    ("🏠 Помещение/мастерская", "equip_space")
+                ])
+            ),
+            33: (
+                "🛠️ *ВОПРОС 18/18 (продолжение): ЗНАНИЯ И ДОСТУП*\n\nКакие нематериальные активы у вас есть?\n(можно выбрать несколько)",
+                (QuestionType.MULTISELECT, [
+                    ("🤝 Профессиональные связи", "know_connections"),
+                    ("🎓 Уникальная экспертиза", "know_expertise"),
+                    ("📊 Доступ к информации", "know_info"),
+                    ("🌟 Личный бренд/аудитория", "know_brand")
+                ])
+            ),
+            34: (
+                "⏰ *ВОПРОС 18/18 (продолжение): ВРЕМЕННОЙ БЮДЖЕТ*\n\nСколько часов в неделю вы реально можете уделить бизнесу на старте?",
+                (QuestionType.BUTTONS, [
+                    ("5-10 часов", "time_5-10"),
+                    ("10-20 часов", "time_10-20"),
+                    ("20-30 часов", "time_20-30"),
+                    ("30-40 часов", "time_30-40"),
+                    ("40+ часов", "time_40+")
+                ])
+            ),
+            35: (
+                "📍 *ВОПРОС 18/18 (продолжение): МАСШТАБ БИЗНЕСА*\n\nКакой масштаб бизнеса вас привлекает?",
+                (QuestionType.BUTTONS, [
+                    ("📍 Локальный (район/город)", "scale_local"),
+                    ("🗺️ Региональный (область)", "scale_region"),
+                    ("🇷🇺 Национальный (Россия)", "scale_national"),
+                    ("🌍 Международный", "scale_international"),
+                    ("🌐 Онлайн-глобальный", "scale_online")
+                ])
+            ),
+            36: (
+                "📍 *ВОПРОС 18/18 (продолжение): ФОРМАТ РАБОТЫ*\n\nКакие у вас предпочтения по формату работы?",
+                (QuestionType.BUTTONS, [
+                    ("🌐 Только онлайн", "format_online"),
+                    ("🏪 Только офлайн", "format_offline"),
+                    ("🔄 Гибрид", "format_hybrid")
+                ])
+            )
+        }
+        
+        return questions.get(question_num, ("Вопрос не найден", (QuestionType.BUTTONS, [])))
+    
+    async def _update_multiselect_message(self, query, session, question_num):
+        """Обновить сообщение с мультиселектом"""
+        question_text, keyboard_data = self._get_question_data(question_num)
+        header = self.ux_manager.get_progress_header(session)
+        praise = self.ux_manager.get_random_praise()
+        
+        selected_count = len(session.temp_multiselect)
+        full_text = f"{praise}\n\n{header}{question_text}\n\n✅ Выбрано: {selected_count}"
+        
+        # Создаем обновленную клавиатуру
+        question_type, options = keyboard_data
+        keyboard = []
+        
+        for option in options:
+            if isinstance(option, tuple):
+                text, callback_data = option
+                if callback_data in session.temp_multiselect:
+                    keyboard.append([InlineKeyboardButton(f"✅ {text}", callback_data=f"select_{callback_data}")])
+                else:
+                    keyboard.append([InlineKeyboardButton(f"□ {text}", callback_data=f"select_{callback_data}")])
+        
+        keyboard.append([InlineKeyboardButton("✅ Завершить выбор", callback_data="multiselect_done")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            niche_text,
-            reply_markup=keyboard,
+            full_text,
+            reply_markup=reply_markup,
             parse_mode='Markdown'
         )
     
-    async def _handle_plan_request(self, query, context, session, callback_data):
-        """Запрос детального плана"""
-        try:
-            niche_id = int(callback_data.split('_')[1])
+    async def _handle_multiselect_done(self, query, session, question_num):
+        """Обработка завершения мультиселекта"""
+        question_text, keyboard_data = self._get_question_data(question_num)
+        
+        # Проверяем количество выбранных вариантов
+        selected = session.temp_multiselect
+        min_selections = 2 if question_num == 5 else 1  # Для мотивации нужно 2-3, для остального 1-2
+        
+        if len(selected) < min_selections:
+            await query.answer(f"❌ Пожалуйста, выберите как минимум {min_selections} варианта", show_alert=True)
+            return
+        
+        # Сохраняем выбранные варианты
+        if question_num == 5:  # Мотивация
+            mot_map = {
+                'mot_freedom': 'Свобода и независимость',
+                'mot_money': 'Стабильный высокий доход',
+                'mot_help': 'Помощь людям, социальная значимость',
+                'mot_creative': 'Творческая реализация, самовыражение',
+                'mot_challenge': 'Решение интересных вызовов, азарт',
+                'mot_status': 'Признание, статус',
+                'mot_balance': 'Баланс работы и жизни',
+                'mot_legacy': 'Наследие, долгосрочный проект'
+            }
+            session.motivations = [mot_map.get(m, m) for m in selected]
             
-            if niche_id in session.detailed_plans:
-                plan = session.detailed_plans[niche_id]
-                plan_text = self.ux_manager.format_plan_for_display(plan)
+        elif question_num == 13:  # Страхи
+            fear_map = {
+                'fear_financial': 'Финансовая нестабильность',
+                'fear_technical': 'Не справиться технически',
+                'fear_failure': 'Провал, осуждение близких',
+                'fear_burnout': 'Выгорание, потеря интереса',
+                'fear_legal': 'Юридические проблемы',
+                'fear_clients': 'Не найти клиентов',
+                'fear_competition': 'Конкуренция'
+            }
+            session.fears_selected = [fear_map.get(f, f) for f in selected]
+            
+        elif question_num == 32:  # Оборудование
+            equip_map = {
+                'equip_computer': 'Компьютер/ноутбук',
+                'equip_camera': 'Камера/фотоаппарат',
+                'equip_tools': 'Специнструменты',
+                'equip_space': 'Помещение/мастерская'
+            }
+            session.equipment = [equip_map.get(e, e) for e in selected]
+            
+        elif question_num == 33:  # Знания
+            know_map = {
+                'know_connections': 'Профессиональные связи',
+                'know_expertise': 'Уникальная экспертиза',
+                'know_info': 'Доступ к информации',
+                'know_brand': 'Личный бренд/аудитория'
+            }
+            session.knowledge_assets = [know_map.get(k, k) for k in selected]
+        
+        session.temp_multiselect = []
+        session.questions_answered += 1
+        await self._ask_next_question(query, session, question_num + 1)
+    
+    async def _handle_slider_value(self, query, session, question_num, value):
+        """Обработка значения слайдера"""
+        # Сохраняем значение в зависимости от вопроса
+        if question_num == 8:  # Уровень риска
+            session.risk_tolerance = value
+        elif question_num == 15:  # Аналитика
+            session.skills_analytics = value
+        elif question_num == 16:  # Коммуникация
+            session.skills_communication = value
+        elif question_num == 17:  # Дизайн
+            session.skills_design = value
+        elif question_num == 18:  # Организация
+            session.skills_organization = value
+        elif question_num == 19:  # Ручной труд
+            session.skills_manual = value
+        elif question_num == 20:  # Эмоциональный интеллект
+            session.skills_eq = value
+        
+        # Показываем текущее значение
+        await query.answer(f"Выбрано: {value}", show_alert=False)
+    
+    async def _handle_slider_confirm(self, query, session, question_num):
+        """Обработка подтверждения слайдера"""
+        session.questions_answered += 1
+        await self._ask_next_question(query, session, question_num + 1)
+    
+    async def _handle_energy_selection(self, query, session, callback_data):
+        """Обработка выбора энергии"""
+        # Для упрощения пропускаем детальную обработку
+        session.questions_answered += 1
+        await self._ask_next_question(query, session, session.current_question + 1)
+    
+    async def _handle_peak_selection(self, query, session, callback_data):
+        """Обработка выбора пиковых часов"""
+        if callback_data.startswith('peak_analytical_'):
+            session.peak_analytical = callback_data.replace('peak_analytical_', '').capitalize()
+        elif callback_data.startswith('peak_creative_'):
+            session.peak_creative = callback_data.replace('peak_creative_', '').capitalize()
+        elif callback_data.startswith('peak_social_'):
+            session.peak_social = callback_data.replace('peak_social_', '').capitalize()
+        
+        # Переходим к следующему вопросу
+        next_question = session.current_question + 1
+        if next_question == 13:  # После всех пиковых часов
+            session.questions_answered += 1
+        
+        await self._ask_next_question(query, session, next_question)
+    
+    async def _handle_button_answer(self, query, context, session, question_num, callback_data):
+        """Обработка ответа на кнопку"""
+        # Обработка ответов в зависимости от вопроса
+        if question_num == 1:  # Возраст
+            age_map = {
+                'age_18-25': '18-25 лет',
+                'age_26-35': '26-35 лет',
+                'age_36-45': '36-45 лет',
+                'age_46+': '46+ лет'
+            }
+            session.age_group = age_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 2)
+            
+        elif question_num == 2:  # Образование
+            edu_map = {
+                'edu_school': 'Среднее',
+                'edu_college': 'Среднее специальное',
+                'edu_incomplete': 'Неоконченное высшее',
+                'edu_bachelor': 'Высшее (бакалавр)',
+                'edu_master': 'Высшее (магистр/специалист)',
+                'edu_multiple': 'Два и более высших',
+                'edu_mba': 'MBA/аспирантура',
+                'edu_self': 'Самообразование (курсы, самоучка)'
+            }
+            session.education = edu_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 3)
+            
+        elif question_num == 3:  # Локация
+            if callback_data == 'loc_custom':
+                # Пользователь напишет сам
+                await query.edit_message_text(
+                    "🏙️ *ВОПРОС 3/18 (продолжение): НАЗВАНИЕ ВАШЕГО ГОРОДА*\n\nНапишите название вашего города или региона:",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            loc_map = {
+                'loc_moscow': 'Москва',
+                'loc_spb': 'Санкт-Петербург',
+                'loc_million': 'Город-миллионник',
+                'loc_region': 'Областной центр',
+                'loc_small': 'Малый город',
+                'loc_village': 'Село/деревня'
+            }
+            session.location_type = loc_map.get(callback_data, 'Не указано')
+            session.location = session.location_type
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 4)
+            
+        elif question_num == 6:  # Стиль решений
+            dec_map = {
+                'dec_feelings': 'Сначала чувства и эмоции, потом логика',
+                'dec_logic': 'Сначала логика и факты, потом чувства',
+                'dec_advice': 'Советуюсь с близкими/экспертами',
+                'dec_table': 'Составляю таблицу плюсов/минусов',
+                'dec_fast': 'Выбираю то, что быстрее принесет результат'
+            }
+            session.decision_style = dec_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 7)
+            
+        elif question_num == 7:  # Риск сценарий
+            risk_map = {
+                'risk_safe': 'Только на проверенные инвестиции (<10% годовых)',
+                'risk_learning': 'На обучение/развитие навыков',
+                'risk_business': 'На запуск своего небольшого дела',
+                'risk_startup': 'На рискованный, но перспективный стартап'
+            }
+            session.risk_scenario = risk_map.get(callback_data, 'Не указано')
+            # Не увеличиваем счетчик - следующий вопрос часть того же
+            await self._ask_next_question(query, session, 8)
+            
+        elif question_num == 21:  # Суперсила
+            power_map = {
+                'power_vision': 'Предвидение трендов и возможностей',
+                'power_persuasion': 'Умение убеждать и вдохновлять',
+                'power_engineering': 'Решение сложных технических проблем',
+                'power_creation': 'Создание красивых и функциональных вещей',
+                'power_insight': 'Понимание скрытых мотивов людей',
+                'power_energy': 'Могу работать сутками на энтузиазме'
+            }
+            session.superpower = power_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 22)
+            
+        elif question_num == 22:  # Режим работы
+            work_map = {
+                'work_alone': 'В одиночку - полный контроль',
+                'work_pair': 'В паре - взаимодополнение',
+                'work_team': 'В команде 3-5 человек',
+                'work_structure': 'В структуре с четкими ролями',
+                'work_remote': 'Удаленно, с периодическими встречами',
+                'work_flexible': 'Гибко - меняю форматы под задачи'
+            }
+            session.work_style = work_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 23)
+            
+        elif question_num == 27:  # Возраст клиента
+            age_map = {
+                'client_20-30': '20-30 лет',
+                'client_30-40': '30-40 лет',
+                'client_40-50': '40-50 лет',
+                'client_50+': '50+ лет'
+            }
+            session.ideal_client_age = age_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 28)
+            
+        elif question_num == 28:  # Сфера клиента
+            field_map = {
+                'field_it': 'IT/Технологии',
+                'field_creative': 'Творчество/Дизайн',
+                'field_business': 'Бизнес/Предпринимательство',
+                'field_education': 'Образование',
+                'field_health': 'Здоровье/Красота',
+                'field_other': 'Другое'
+            }
+            session.ideal_client_field = field_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 29)
+            
+        elif question_num == 29:  # Боль клиента
+            pain_map = {
+                'pain_time': 'Не хватает времени',
+                'pain_system': 'Нет системности',
+                'pain_expertise': 'Нет экспертизы',
+                'pain_clients': 'Нет клиентов',
+                'pain_money': 'Не хватает денег'
+            }
+            session.ideal_client_pain = pain_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 30)
+            
+        elif question_num == 31:  # Бюджет
+            budget_map = {
+                'budget_50k': '< 50,000₽',
+                'budget_200k': '50,000-200,000₽',
+                'budget_500k': '200,000-500,000₽',
+                'budget_more': '> 500,000₽'
+            }
+            session.budget = budget_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 32)
+            
+        elif question_num == 34:  # Время
+            time_map = {
+                'time_5-10': '5-10 часов (параллельно с работой)',
+                'time_10-20': '10-20 часов (серьезный side-project)',
+                'time_20-30': '20-30 часов (почти полный день)',
+                'time_30-40': '30-40 часов (можно погрузиться)',
+                'time_40+': '40+ часов (готов(а) работать сутками)'
+            }
+            session.time_per_week = time_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 35)
+            
+        elif question_num == 35:  # Масштаб
+            scale_map = {
+                'scale_local': 'Локальный (район/город)',
+                'scale_region': 'Региональный (область)',
+                'scale_national': 'Национальный (Россия)',
+                'scale_international': 'Международный',
+                'scale_online': 'Онлайн-глобальный'
+            }
+            session.business_scale = scale_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            await self._ask_next_question(query, session, 36)
+            
+        elif question_num == 36:  # Формат
+            format_map = {
+                'format_online': 'Только онлайн',
+                'format_offline': 'Только офлайн',
+                'format_hybrid': 'Гибрид (онлайн + офлайн)'
+            }
+            session.business_format = format_map.get(callback_data, 'Не указано')
+            session.questions_answered += 1
+            # Все вопросы отвечены
+            await self._finish_questionnaire(query, session)
+    
+    async def _finish_questionnaire(self, update, session):
+        """Завершить вопросник"""
+        session.current_state = BotState.ANALYZING
+        
+        praise = self.ux_manager.get_random_praise()
+        
+        finish_text = f"""🎉 *БРАВО! АНКЕТА ЗАВЕРШЕНА!*
+
+{praise}
+
+✅ Отвечено: {session.questions_answered} вопросов
+⏱️ Время заполнения: ~{(datetime.now() - session.start_time).seconds // 60} минут
+🎯 Глубина анализа: профессиональный уровень
+
+🤖 *Запускаю AI-анализ...*
+1. Анализирую психологический профиль
+2. Ищу скрытый потенциал  
+3. Подбираю уникальные ниши
+4. Готовлю персонализированные планы
+
+⏳ *Это займет 1-2 минуты*
+Пока AI работает, можете отдохнуть ☕"""
+        
+        if isinstance(update, Update) and update.message:
+            await update.message.reply_text(finish_text, parse_mode='Markdown')
+        elif hasattr(update, 'callback_query'):
+            await update.callback_query.edit_message_text(finish_text, parse_mode='Markdown')
+        
+        # Сохраняем сессию
+        self.data_manager.save_session(session)
+        self.data_manager.mark_profile_completed(session.user_id)
+        
+        # Запускаем AI анализ асинхронно
+        asyncio.create_task(self._start_ai_analysis(update, session))
+    
+    async def _start_ai_analysis(self, update, session):
+        """Запустить AI анализ"""
+        try:
+            # Генерация психологического анализа
+            analysis = await self.openai_service.generate_psychological_analysis(session)
+            session.psychological_analysis = analysis
+            
+            # Генерация бизнес-ниш
+            niches = await self.openai_service.generate_business_niches(session, analysis)
+            session.generated_niches = niches
+            self.data_manager.add_generated_niches(len(niches))
+            
+            # Генерация планов для первых 3 ниш
+            plans_generated = 0
+            for i, niche in enumerate(session.generated_niches[:3]):
+                plan = await self.openai_service.generate_detailed_plan(session, niche)
+                if plan:
+                    session.detailed_plans[str(niche.get('id', i))] = plan
+                    plans_generated += 1
+                    self.data_manager.add_generated_plan()
+            
+            # Показываем результат
+            stats = self.data_manager.openai_usage
+            stats_text = stats.get_stats_str() if stats.total_requests > 0 else ""
+            
+            result_text = f"""🎉 *АНАЛИЗ ЗАВЕРШЕН!*
+
+✅ Создано: {len(session.generated_niches)} уникальных бизнес-ниш
+📊 Психологический портрет: готов
+📋 Детальные планы: {plans_generated} шт
+
+{stats_text}
+
+👇 *Выберите первую нишу для изучения:*"""
+            
+            if hasattr(update, 'callback_query'):
+                chat_id = update.callback_query.message.chat_id
+            elif isinstance(update, Update) and update.message:
+                chat_id = update.message.chat_id
+            else:
+                chat_id = session.chat_id
+            
+            await self.application.bot.send_message(
+                chat_id=chat_id,
+                text=result_text,
+                parse_mode='Markdown'
+            )
+            
+            session.current_state = BotState.NICHE_SELECTION
+            await self._show_current_niche(None, session, chat_id)
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка AI анализа: {e}")
+            
+            # Используем запасные данные
+            await self._use_fallback_data(update, session)
+    
+    async def _use_fallback_data(self, update, session):
+        """Использовать запасные данные"""
+        session.psychological_analysis = self.openai_service._create_fallback_analysis(session)
+        session.generated_niches = self.openai_service._create_fallback_niches(session)
+        
+        result_text = f"""🎉 *АНАЛИЗ ЗАВЕРШЕН (базовый режим)*
+
+✅ Создано: {len(session.generated_niches)} бизнес-ниш
+📊 Использованы стандартные шаблоны
+⚠️ AI временно недоступен
+
+👇 *Выберите первую нишу для изучения:*"""
+        
+        if hasattr(update, 'callback_query'):
+            chat_id = update.callback_query.message.chat_id
+            await update.callback_query.edit_message_text(result_text, parse_mode='Markdown')
+        elif isinstance(update, Update) and update.message:
+            chat_id = update.message.chat_id
+            await update.message.reply_text(result_text, parse_mode='Markdown')
+        else:
+            chat_id = session.chat_id
+            await self.application.bot.send_message(
+                chat_id=chat_id,
+                text=result_text,
+                parse_mode='Markdown'
+            )
+        
+        session.current_state = BotState.NICHE_SELECTION
+        await self._show_current_niche(None, session, chat_id)
+    
+    async def _show_current_niche(self, query, session, chat_id=None):
+        """Показать текущую нишу"""
+        if not session.generated_niches:
+            error_text = "❌ Ниши не сгенерированы. Попробуйте начать заново /start"
+            if query:
+                await query.edit_message_text(error_text, parse_mode='Markdown')
+            elif chat_id:
+                await self.application.bot.send_message(
+                    chat_id=chat_id,
+                    text=error_text,
+                    parse_mode='Markdown'
+            )
+            return
+        
+        niche = session.generated_niches[session.selected_niche_index]
+        niche_text = self.ux_manager.format_niche_for_display(
+            niche, 
+            session.selected_niche_index + 1, 
+            len(session.generated_niches)
+        )
+        
+        keyboard = self.ux_manager.create_niche_navigation(session)
+        
+        if query:
+            await query.edit_message_text(
+                niche_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+        elif chat_id:
+            await self.application.bot.send_message(
+                chat_id=chat_id,
+                text=niche_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+    
+    async def _show_detailed_plan(self, query, context, session, callback_data):
+        """Показать детальный план"""
+        try:
+            niche_id = callback_data.split('_')[1]
+            plan = session.detailed_plans.get(niche_id)
+            
+            if plan:
+                plan_text = f"""📋 *ДЕТАЛЬНЫЙ БИЗНЕС-ПЛАН*
+
+{plan[:3500]}..."""
                 
                 keyboard = [[
                     InlineKeyboardButton("◀️ Назад к нишам", callback_data="back_to_niches"),
@@ -2796,21 +2298,12 @@ class BusinessNavigatorBot:
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
                 await query.edit_message_text(
-                    plan_text[:4000],  # Ограничение Telegram
+                    plan_text,
                     reply_markup=reply_markup,
                     parse_mode='Markdown'
                 )
                 
-                # Если план длинный, отправляем остальное
-                if len(plan_text) > 4000:
-                    remaining = plan_text[4000:]
-                    parts = [remaining[i:i+4000] for i in range(0, len(remaining), 4000)]
-                    for part in parts:
-                        await context.bot.send_message(
-                            chat_id=session.chat_id,
-                            text=part,
-                            parse_mode='Markdown'
-                        )
+                session.current_state = BotState.DETAILED_PLAN
             else:
                 await query.answer("❌ План для этой ниши еще не сгенерирован", show_alert=True)
                 
@@ -2818,7 +2311,7 @@ class BusinessNavigatorBot:
             logger.error(f"Ошибка показа плана: {e}")
             await query.answer("❌ Ошибка загрузки плана", show_alert=True)
     
-    async def _show_analysis(self, query, context, session):
+    async def _show_psych_analysis(self, query, context, session):
         """Показать психологический анализ"""
         if session.psychological_analysis:
             analysis_text = self.ux_manager.format_analysis_for_display(session.psychological_analysis)
@@ -2831,6 +2324,8 @@ class BusinessNavigatorBot:
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
+            
+            session.current_state = BotState.PSYCH_ANALYSIS
         else:
             await query.answer("❌ Анализ не сгенерирован", show_alert=True)
     
@@ -2839,7 +2334,7 @@ class BusinessNavigatorBot:
         await query.answer("💾 Сохраняю все данные...", show_alert=True)
         
         # Сохраняем сессию
-        self.data_manager.save_session(session.user_id)
+        self.data_manager.save_session(session)
         
         # Отправляем все ниши
         for i, niche in enumerate(session.generated_niches):
@@ -2865,10 +2360,10 @@ class BusinessNavigatorBot:
         
         await query.answer("✅ Все данные сохранены в истории чата!", show_alert=True)
     
-    async def _start_over(self, query, context, session):
+    async def _start_over(self, query, session):
         """Начать заново"""
         # Сохраняем текущую сессию
-        self.data_manager.save_session(session.user_id)
+        self.data_manager.save_session(session)
         
         # Удаляем из активных
         if session.user_id in self.data_manager.user_sessions:
@@ -2892,44 +2387,17 @@ class BusinessNavigatorBot:
 
 {self.data_manager.stats.get_stats_str()}
 
-{self.data_manager.openai_usage.get_stats_str() if self.data_manager.openai_usage.total_requests > 0 else ''}"""
+{self.data_manager.openai_usage.get_stats_str() if self.data_manager.openai_usage.total_requests > 0 else ''}
+
+*Активные сессии:* {len(self.data_manager.user_sessions)}"""
         
         await query.edit_message_text(stats_text, parse_mode='Markdown')
-    
-    async def _handle_question_answer(self, query, context, session, callback_data):
-        """Обработка ответа на вопрос"""
-        await self.questionnaire.handle_answer(
-            query, context, session, session.current_question, callback_data
-        )
-    
-    async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик текстовых сообщений"""
-        user_id = update.effective_user.id
-        message_text = update.message.text
-        
-        # Получаем сессию
-        session = self.data_manager.get_or_create_session(
-            user_id=user_id,
-            chat_id=update.message.chat_id,
-            username=update.effective_user.username,
-            first_name=update.effective_user.first_name,
-            last_name=update.effective_user.last_name
-        )
-        
-        # Увеличиваем счетчик сообщений
-        self.data_manager.increment_messages()
-        
-        # Обрабатываем текстовый ответ
-        await self.questionnaire.handle_answer(
-            update, context, session, session.current_question, message_text
-        )
     
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик ошибок"""
         logger.error(f"Ошибка: {context.error}", exc_info=context.error)
         
         try:
-            # Пытаемся отправить сообщение об ошибке
             error_text = "❌ *Произошла ошибка*\n\nПожалуйста, попробуйте начать заново /start"
             
             if update and update.effective_chat:
@@ -2943,12 +2411,6 @@ class BusinessNavigatorBot:
     
     async def run(self):
         """Запустить бота"""
-        # Сохраняем менеджеры в application.bot_data
-        self.application.bot_data['data_manager'] = self.data_manager
-        self.application.bot_data['openai_service'] = self.openai_service
-        self.application.bot_data['questionnaire'] = self.questionnaire
-        self.application.bot_data['ux_manager'] = self.ux_manager
-        
         logger.info("🚀 Запуск Бизнес-Навигатора...")
         
         # Запускаем поллинг
@@ -2967,10 +2429,6 @@ class BusinessNavigatorBot:
                 # Очистка старых сессий каждые 30 минут
                 self.data_manager.cleanup_old_sessions()
                 
-                # Логируем статистику каждые 10 минут
-                if datetime.now().minute % 10 == 0:
-                    logger.info(f"📊 Статистика: {self.data_manager.stats.get_stats_str()}")
-                
                 await asyncio.sleep(300)  # 5 минут
                 
         except KeyboardInterrupt:
@@ -2979,11 +2437,12 @@ class BusinessNavigatorBot:
             logger.error(f"❌ Критическая ошибка: {e}")
         finally:
             # Сохраняем все сессии
-            for user_id in list(self.data_manager.user_sessions.keys()):
-                self.data_manager.save_session(user_id)
+            for session in self.data_manager.user_sessions.values():
+                self.data_manager.save_session(session)
             
             # Останавливаем бота
-            await self.application.updater.stop()
+            if self.application.updater:
+                await self.application.updater.stop()
             await self.application.stop()
             await self.application.shutdown()
             logger.info("✅ Бот остановлен")
