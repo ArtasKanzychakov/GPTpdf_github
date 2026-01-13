@@ -180,5 +180,116 @@ def format_openai_usage(usage: Dict[str, Any]) -> str:
         f"• Токены: {usage.get('tokens', 0)}\n"
         f"• Стоимость: ${usage.get('cost', 0):.4f}"
     )
+def format_niche(niche_details, include_examples: bool = True) -> str:
+    """
+    Форматирование информации о нише
+    
+    Args:
+        niche_details: Объект NicheDetails
+        include_examples: Включать ли примеры бизнесов
+    
+    Returns:
+        Отформатированное описание ниши
+    """
+    if not niche_details:
+        return "❌ Информация о нише недоступна"
+    
+    try:
+        # Используем метод full_description из NicheDetails
+        if hasattr(niche_details, 'full_description'):
+            formatted = niche_details.full_description
+        else:
+            # Резервный вариант
+            formatted = (
+                f"{niche_details.emoji} *{niche_details.name}*\n"
+                f"📊 Категория: {niche_details.category.value}\n"
+                f"📝 {niche_details.description}\n\n"
+                f"⏱️ Срок выхода на прибыль: {niche_details.time_to_profit}\n"
+                f"🎯 Уровень риска: {'★' * niche_details.risk_level}{'☆' * (5 - niche_details.risk_level)} "
+                f"({niche_details.risk_level}/5)\n"
+                f"💰 Мин. бюджет: {niche_details.min_budget:,.0f} руб\n"
+                f"📈 Шанс успеха: {niche_details.success_rate*100:.0f}%"
+            )
+        
+        # Добавляем примеры если нужно
+        if include_examples and hasattr(niche_details, 'examples') and niche_details.examples:
+            formatted += f"\n\n💡 *Примеры бизнесов:*\n"
+            for i, example in enumerate(niche_details.examples[:3], 1):
+                formatted += f"{i}. {example}\n"
+            if len(niche_details.examples) > 3:
+                formatted += f"... и ещё {len(niche_details.examples) - 3}\n"
+        
+        return formatted
+        
+    except Exception as e:
+        logger.error(f"Ошибка форматирования ниши: {e}")
+        return f"📊 *{niche_details.name}*\n{niche_details.description[:200]}..."
+
+def format_analysis(analysis_data: Dict[str, Any]) -> str:
+    """
+    Форматирование психологического анализа
+    
+    Args:
+        analysis_data: Данные анализа
+    
+    Returns:
+        Отформатированный анализ
+    """
+    try:
+        if not analysis_data:
+            return "📊 Анализ пока не готов. Пройдите анкету полностью."
+        
+        # Базовая структура
+        formatted = "🧠 *Психологический анализ профиля*\n\n"
+        
+        # Темперамент/тип личности
+        if 'personality_type' in analysis_data:
+            formatted += f"🎭 *Тип личности:* {analysis_data['personality_type']}\n"
+        
+        # Сильные стороны
+        if 'strengths' in analysis_data:
+            strengths = analysis_data['strengths']
+            if isinstance(strengths, list):
+                formatted += f"\n✅ *Сильные стороны:*\n"
+                for i, strength in enumerate(strengths[:5], 1):
+                    formatted += f"{i}. {strength}\n"
+            else:
+                formatted += f"\n✅ *Сильные стороны:* {strengths}\n"
+        
+        # Зоны роста
+        if 'growth_areas' in analysis_data:
+            growth_areas = analysis_data['growth_areas']
+            if isinstance(growth_areas, list):
+                formatted += f"\n📈 *Зоны роста:*\n"
+                for i, area in enumerate(growth_areas[:3], 1):
+                    formatted += f"{i}. {area}\n"
+            else:
+                formatted += f"\n📈 *Зоны роста:* {growth_areas}\n"
+        
+        # Рекомендации
+        if 'recommendations' in analysis_data:
+            recommendations = analysis_data['recommendations']
+            if isinstance(recommendations, list):
+                formatted += f"\n🎯 *Рекомендации:*\n"
+                for i, rec in enumerate(recommendations[:5], 1):
+                    formatted += f"{i}. {rec}\n"
+            else:
+                formatted += f"\n🎯 *Рекомендации:* {recommendations}\n"
+        
+        # Стиль работы
+        if 'work_style' in analysis_data:
+            formatted += f"\n🏢 *Стиль работы:* {analysis_data['work_style']}\n"
+        
+        # Уровень мотивации
+        if 'motivation_level' in analysis_data:
+            level = analysis_data['motivation_level']
+            stars = "★" * min(5, level) + "☆" * max(0, 5 - level)
+            formatted += f"\n⚡ *Уровень мотивации:* {stars} ({level}/10)\n"
+        
+        return formatted
+        
+    except Exception as e:
+        logger.error(f"Ошибка форматирования анализа: {e}")
+        return "🧠 *Психологический анализ*\n\nАнализ успешно завершён. Для деталей пройдите полную анкету."
 
 # Если нужно, добавьте другие функции форматирования
