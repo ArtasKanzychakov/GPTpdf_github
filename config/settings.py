@@ -1,11 +1,10 @@
 """
-Конфигурация бота
+Конфигурация бота - получение переменных из окружения Render
 """
 import os
 import logging
 from typing import Optional
 from pathlib import Path
-from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -13,16 +12,16 @@ class BotConfig:
     """Конфигурация бота"""
     
     def __init__(self):
-        # Загружаем .env файл
-        load_dotenv()
-        
         # Пути
         self.base_dir = Path(__file__).parent.parent
         self.data_dir = self.base_dir / "data"
         self.data_dir.mkdir(exist_ok=True)
         
-        # Токены и ключи
+        # Токены и ключи ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ RENDER
+        # Получаем токен из переменных окружения
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        
+        # OpenAI ключ (опционально)
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         
         # Настройки OpenAI
@@ -39,15 +38,17 @@ class BotConfig:
         self.question_timeout = 300
         self.analysis_timeout = 120
         
-        # Настройки Telegram
+        # Настройки Telegram polling (важно для стабильности)
         self.polling_timeout = 30
         self.polling_connect_timeout = 30
         self.polling_read_timeout = 30
         self.polling_write_timeout = 30
+        self.polling_poll_interval = 1.0
         
-        # Настройки веб-сервера (для health check)
+        # Настройки веб-сервера для health check (Render)
+        # PORT переменная автоматически устанавливается Render
         self.port = int(os.getenv("PORT", "10000"))
-        self.host = "0.0.0.0"
+        self.host = "0.0.0.0"  # Обязательно для Render
         
         # Фразы похвалы
         self.praise_phrases = [
@@ -63,17 +64,21 @@ class BotConfig:
             "Блестяще! Ваши ответы - золотая жила для подбора ниши 🏆",
         ]
         
+        # Логируем конфигурацию (без ключей!)
         logger.info("📋 Конфигурация загружена")
+        logger.info(f"  • Python: {os.sys.version}")
+        logger.info(f"  • Telegram Bot: {'✅' if self.telegram_token else '❌'}")
+        logger.info(f"  • OpenAI: {'✅' if self.openai_api_key else '⚠️ (базовый режим)'}")
+        logger.info(f"  • Port: {self.port}")
+        logger.info(f"  • Host: {self.host}")
+        logger.info(f"  • Data dir: {self.data_dir}")
     
     def validate(self) -> bool:
         """Валидация конфигурации"""
         errors = []
         
         if not self.telegram_token:
-            errors.append("TELEGRAM_BOT_TOKEN не установлен")
-        
-        if not self.openai_api_key:
-            logger.warning("⚠️ OPENAI_API_KEY не установлен. AI функции отключены.")
+            errors.append("TELEGRAM_BOT_TOKEN не найден в переменных окружения")
         
         if errors:
             for error in errors:
