@@ -1,0 +1,84 @@
+{
+  "version": "2.0",
+  "total_questions": 18,
+  "questions": [
+    {
+      "id": 1,
+      "part": 1,
+      "text": "🔢 *ВОПРОС 1/18: ВАШ ВОЗРАСТ*\\n\\nВыберите вашу возрастную группу:",
+      "type": "buttons",
+      "options": [
+        {
+          "text": "18-25 лет",
+          "value": "age_18-25",
+          "store_field": "age_group"
+        },
+        {
+          "text": "26-35 лет",
+          "value": "age_26-35",
+          "store_field": "age_group"
+        },
+        {
+          "text": "36-45 лет",
+          "value": "age_36-45",
+          "store_field": "age_group"
+        },
+        {
+          "text": "46+ лет",
+          "value": "age_46+",
+          "store_field": "age_group"
+        }
+      ],
+      "next_question": 2
+    },
+    {
+      "id": 2,
+      "part": 1,
+      "text": "🎓 *ВОПРОС 2/18: ВАШЕ ОБРАЗОВАНИЕ*\\n\\nВыберите ваш образовательный уровень:",
+      "type": "buttons",
+      "options": [
+        {
+          "text": "Среднее",
+          "value": "edu_school",
+          "store_field": "education"
+        },
+        {
+          "text": "Среднее специальное",
+          "value": "edu_college",
+          "store_field": "education"
+        },
+        {
+          "text": "Неоконченное высшее",
+          "value": "edu_incomplete",
+          "store_field": "education"
+        },
+        {
+          "text": "Высшее (бакалавр)",
+          "value": "edu_bachelor",
+          "store_field": "education"
+        },
+        {
+          "text": "Высшее (магистр/специалист)",
+          "value": "edu_master",
+          "store_field": "education"
+        },
+        {
+          "text": "Два и более высших",
+          "value": "edu_multiple",
+          "store_field": "education"
+        },
+        {
+          "text": "MBA/аспирантура",
+          "value": "edu_mba",
+          "store_field": "education"
+        },
+        {
+          "text": "Самообразование",
+          "value": "edu_self",
+          "store_field": "education"
+        }
+      ],
+      "next_question": 3
+    }
+  ]
+}
