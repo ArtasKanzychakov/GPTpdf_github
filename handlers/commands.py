@@ -13,18 +13,21 @@ from telegram.ext import ContextTypes, CallbackContext
 
 from models.enums import BotState
 from models.session import UserSession
-from services.data_manager import data_manager
+from services.data_manager import DataManager  # Импортируем КЛАСС
 from utils.formatters import (
     format_session_summary, 
     format_recommendations,
     format_answer_summary,
     create_restart_keyboard,
     format_openai_usage,
-    format_niche,  # Добавленная функция
-    format_analysis  # Добавленная функция
+    format_niche,
+    format_analysis
 )
 
 logger = logging.getLogger(__name__)
+
+# СОЗДАЕМ ЭКЗЕМПЛЯР DataManager вместо импорта глобальной переменной
+data_manager = DataManager()
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -129,27 +132,26 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /stats"""
     try:
-        stats = data_manager.get_statistics()
+        stats = data_manager.stats  # Используем stats из data_manager
         
         stats_text = (
             f"📊 *Статистика Бизнес-Навигатора v7.0*\n\n"
             f"👤 Пользователей всего: {stats.total_users}\n"
             f"📝 Активных сессий: {stats.active_sessions}\n"
-            f"✅ Завершённых анкет: {stats.completed_questionnaires}\n"
-            f"⏱️ Среднее время анкеты: {stats.avg_questionnaire_time:.1f} мин\n"
-            f"📅 Бот работает с: {stats.bot_start_time.strftime('%d.%m.%Y')}\n\n"
-            f"🎯 *Рекомендации выдано:* {stats.recommendations_given}\n"
-            f"💎 *Популярные ниши:*\n"
+            f"✅ Завершённых анкет: {stats.completed_profiles}\n"
+            f"💎 Сгенерированных ниш: {stats.generated_niches}\n"
+            f"📋 Сгенерированных планов: {stats.generated_plans}\n"
+            f"💬 Всего сообщений: {stats.total_messages}\n\n"
         )
         
-        # Добавляем популярные ниши
-        for niche, count in stats.popular_niches[:3]:
-            stats_text += f"• {niche}: {count}\n"
-        
-        if stats.recent_activity:
-            stats_text += f"\n🔄 *Недавняя активность:*\n"
-            for activity in stats.recent_activity[:2]:
-                stats_text += f"• {activity}\n"
+        # Добавляем время последней активности
+        if hasattr(data_manager, 'user_sessions') and data_manager.user_sessions:
+            recent_sessions = list(data_manager.user_sessions.values())[:3]
+            stats_text += f"🔄 *Недавняя активность:*\n"
+            for session in recent_sessions:
+                if session.last_activity:
+                    time_diff = (datetime.now() - session.last_activity).seconds // 60
+                    stats_text += f"• {session.user_name}: {time_diff} мин назад\n"
         
         await update.message.reply_text(
             text=stats_text,
@@ -165,26 +167,40 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /balance"""
     try:
-        from services.openai_service import openai_service
+        from services.openai_service import OpenAIService
+        from config.settings import config
         
-        if not openai_service:
+        if not config.openai_api_key:
             await update.message.reply_text(
                 "🤖 OpenAI отключен. Работаем в базовом режиме."
             )
             return
         
-        balance_info = await openai_service.get_balance_info()
+        # Создаем экземпляр сервиса
+        openai_service = OpenAIService(config)
         
-        balance_text = (
-            f"💰 *Баланс OpenAI*\n\n"
-            f"💳 Текущий баланс: ${balance_info.get('balance', 0):.2f}\n"
-            f"📊 Использовано токенов: {balance_info.get('tokens_used', 0)}\n"
-            f"📈 Запросов выполнено: {balance_info.get('requests_made', 0)}\n"
-            f"⏱️ Последняя проверка: {balance_info.get('last_check', 'никогда')}\n\n"
-        )
+        # Получаем информацию о балансе
+        available, info = await openai_service.check_availability()
         
-        if balance_info.get('balance_warning', False):
-            balance_text += "⚠️ *Внимание:* Баланс заканчивается!\n"
+        if available:
+            balance_text = (
+                f"💰 *Баланс OpenAI*\n\n"
+                f"✅ Сервис доступен\n"
+                f"📊 {info}\n\n"
+                f"📈 Использование:\n"
+                f"• Запросов: {data_manager.openai_usage.requests}\n"
+                f"• Токенов: {data_manager.openai_usage.tokens}\n"
+                f"• Стоимость: ${data_manager.openai_usage.cost:.4f}"
+            )
+        else:
+            balance_text = (
+                f"💰 *Баланс OpenAI*\n\n"
+                f"⚠️ Проблемы с доступом:\n"
+                f"{info}\n\n"
+                f"📊 Использование (последнее):\n"
+                f"• Запросов: {data_manager.openai_usage.requests}\n"
+                f"• Токенов: {data_manager.openai_usage.tokens}"
+            )
         
         await update.message.reply_text(
             text=balance_text,
@@ -219,8 +235,8 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔄 *Перезапуск анкеты*\n\n"
             f"Вы уверены, что хотите начать анкету заново?\n\n"
             f"📋 *Текущий прогресс:*\n"
-            f"• Вопросов пройдено: {session.current_question_index}/18\n"
-            f"• Ответов сохранено: {len(session.answers)}\n\n"
+            f"• Вопросов пройдено: {session.current_question_index if hasattr(session, 'current_question_index') else 0}/18\n"
+            f"• Ответов сохранено: {len(session.answers) if hasattr(session, 'answers') else 0}\n\n"
             f"⚠️ *Внимание:* Все ваши текущие ответы будут удалены!"
         )
         
@@ -257,12 +273,12 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             data_manager.save_session(session)
         
         # Проверяем, есть ли незавершенная анкета
-        if session.current_question_index > 0 and session.current_question_index < 18:
+        if hasattr(session, 'current_question_index') and session.current_question_index > 0 and session.current_question_index < 18:
             continue_text = (
                 f"📊 *Продолжить анкету?*\n\n"
                 f"У вас есть незавершенная анкета:\n"
                 f"• Пройдено вопросов: {session.current_question_index}/18\n"
-                f"• Состояние: {session.current_state.value}\n\n"
+                f"• Состояние: {session.current_state.value if hasattr(session, 'current_state') else 'неизвестно'}\n\n"
                 f"Хотите продолжить с того же места?"
             )
             
@@ -282,17 +298,26 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             return
         
         # Начинаем новую анкету
-        from core.bot import bot_instance
+        from config.settings import config
         
-        if not bot_instance:
+        if not config.questions:
             await update.message.reply_text(
-                "❌ Бот не инициализирован. Попробуйте позже."
+                "❌ Вопросы не загружены. Обратитесь к администратору."
             )
             return
         
-        # Сбрасываем сессию для новой анкеты
-        session.reset_for_new_questionnaire()
-        session.current_state = BotState.START
+        # Сбрасываем сессию для новой анкеты (если есть метод reset)
+        if hasattr(session, 'reset_for_new_questionnaire'):
+            session.reset_for_new_questionnaire()
+        else:
+            # Простой сброс
+            session.current_state = BotState.START
+            if hasattr(session, 'current_question_index'):
+                session.current_question_index = 0
+            if hasattr(session, 'answers'):
+                session.answers = {}
+        
+        session.last_activity = datetime.now()
         data_manager.save_session(session)
         
         start_text = (
@@ -314,15 +339,14 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="Markdown"
         )
         
-        # Запускаем первый вопрос через бота
-        from config.settings import config
-        
-        if config.questions:
+        # Ищем бот в контексте
+        if context and hasattr(context, 'bot_data') and 'bot_instance' in context.bot_data:
+            bot_instance = context.bot_data['bot_instance']
             first_question = config.questions[0]
             await bot_instance.send_question(user_id, first_question)
         else:
             await update.message.reply_text(
-                "❌ Вопросы не загружены. Обратитесь к администратору."
+                "📝 *Первый вопрос:*\n" + config.questions[0]['text']
             )
         
     except Exception as e:
@@ -345,16 +369,16 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         status_text = format_session_summary(session)
         
-        if session.answers:
+        if hasattr(session, 'answers') and session.answers:
             status_text += "\n\n" + format_answer_summary(session.answers)
         
         # Добавляем кнопки действий
         keyboard = []
         
-        if session.current_state == BotState.IN_QUESTIONNAIRE and session.current_question_index < 18:
+        if hasattr(session, 'current_state') and session.current_state == BotState.IN_QUESTIONNAIRE and hasattr(session, 'current_question_index') and session.current_question_index < 18:
             keyboard.append([InlineKeyboardButton("▶️ Продолжить анкету", callback_data="continue_questionnaire")])
         
-        if session.current_question_index > 0:
+        if hasattr(session, 'answers') and session.answers:
             keyboard.append([InlineKeyboardButton("📊 Показать ответы", callback_data="show_answers")])
         
         keyboard.append([InlineKeyboardButton("🔄 Начать заново", callback_data="restart_confirm")])
@@ -378,12 +402,10 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = update.effective_user.id
         
-        # Проверяем, является ли пользователь разработчиком
-        # Можно добавить проверку по ID или другому признаку
         debug_info = (
             f"🐛 *Отладочная информация*\n\n"
             f"👤 User ID: {user_id}\n"
-            f"📊 Всего сессий: {data_manager.get_active_sessions_count()}\n"
+            f"📊 Всего сессий: {data_manager.get_session_count()}\n"
             f"🕒 Время сервера: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             f"📁 Конфигурация:\n"
         )
