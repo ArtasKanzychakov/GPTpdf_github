@@ -1,97 +1,134 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Конфигурация бота - получение переменных из окружения Render
+Конфигурационные настройки бота
 """
+
 import os
-import logging
-from typing import Optional
+import json  # ИЗМЕНЕНИЕ 1: Заменяем yaml на json
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Dict, Any, List, Optional
 
-logger = logging.getLogger(__name__)
+from models.enums import NicheCategory
 
+@dataclass
 class BotConfig:
     """Конфигурация бота"""
     
-    def __init__(self):
-        # Пути
-        self.base_dir = Path(__file__).parent.parent
-        self.data_dir = self.base_dir / "data"
-        self.data_dir.mkdir(exist_ok=True)
+    # Токены и ключи
+    telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_BOT_TOKEN', ''))
+    openai_api_key: str = field(default_factory=lambda: os.getenv('OPENAI_API_KEY', ''))
+    
+    # Настройки сервера
+    host: str = field(default_factory=lambda: os.getenv('HOST', '0.0.0.0'))
+    port: int = field(default_factory=lambda: int(os.getenv('PORT', '10000')))
+    
+    # Настройки OpenAI
+    openai_model: str = field(default_factory=lambda: os.getenv('OPENAI_MODEL', 'gpt-4-turbo-preview'))
+    openai_temperature: float = field(default_factory=lambda: float(os.getenv('OPENAI_TEMPERATURE', '0.7')))
+    openai_max_tokens: int = field(default_factory=lambda: int(os.getenv('OPENAI_MAX_TOKENS', '2000')))
+    
+    # Настройки бота
+    bot_language: str = field(default_factory=lambda: os.getenv('BOT_LANGUAGE', 'ru'))
+    cleanup_hours: int = field(default_factory=lambda: int(os.getenv('CLEANUP_HOURS', '24')))
+    max_questions: int = field(default_factory=lambda: int(os.getenv('MAX_QUESTIONS', '18')))
+    
+    # Данные вопросов
+    questions: List[Dict[str, Any]] = field(default_factory=list)
+    question_categories: Dict[str, str] = field(default_factory=dict)
+    niche_categories: List[NicheCategory] = field(default_factory=list)
+    
+    def __post_init__(self):
+        """Загрузка вопросов после инициализации"""
+        # Определяем путь к файлу с вопросами
+        # ИЗМЕНЕНИЕ 2: Пытаемся найти JSON, если нет - YAML
+        config_dir = Path(__file__).parent
         
-        # Токены и ключи ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ RENDER
-        # Получаем токен из переменных окружения
-        self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        # Сначала ищем questions.json
+        json_path = config_dir / 'questions.json'
+        yaml_path = config_dir / 'questions.yaml'
         
-        # OpenAI ключ (опционально)
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        questions_path = None
+        if json_path.exists():
+            questions_path = json_path
+            logger_method = "JSON"
+        elif yaml_path.exists():
+            questions_path = yaml_path
+            logger_method = "YAML"
+            # Если используем YAML, нужно импортировать библиотеку
+            try:
+                import yaml
+            except ImportError:
+                raise ImportError("Для работы с YAML файлами требуется библиотека PyYAML. "
+                                "Установите её: pip install pyyaml")
+        else:
+            raise FileNotFoundError(
+                f"Не найден файл с вопросами. Ожидался один из: "
+                f"questions.json или questions.yaml в папке {config_dir}"
+            )
         
-        # Настройки OpenAI
-        self.openai_model = "gpt-3.5-turbo"
-        self.openai_max_tokens = 4000
-        self.openai_temperature = 0.7
+        # Загружаем вопросы
+        with open(questions_path, 'r', encoding='utf-8') as f:
+            # ИЗМЕНЕНИЕ 3: Загружаем в зависимости от формата
+            if questions_path.suffix == '.json':
+                data = json.load(f)
+            else:
+                data = yaml.safe_load(f)
         
-        # Лимиты
-        self.max_niches_to_generate = 8
-        self.max_plans_to_generate = 3
-        self.session_timeout_hours = 24  # Сессии живут 24 часа
+        # Извлекаем данные
+        self.questions = data.get('questions', [])
+        self.question_categories = data.get('categories', {})
         
-        # Время ожидания
-        self.question_timeout = 300
-        self.analysis_timeout = 120
+        # Преобразуем категории ниш в enum
+        niche_categories_data = data.get('niche_categories', [])
+        self.niche_categories = []
         
-        # Настройки Telegram polling (важно для стабильности)
-        self.polling_timeout = 30
-        self.polling_connect_timeout = 30
-        self.polling_read_timeout = 30
-        self.polling_write_timeout = 30
-        self.polling_poll_interval = 1.0
+        for category_data in niche_categories_data:
+            try:
+                category = NicheCategory(
+                    id=category_data['id'],
+                    name=category_data['name'],
+                    description=category_data.get('description', ''),
+                    emoji=category_data.get('emoji', '📊')
+                )
+                self.niche_categories.append(category)
+            except (KeyError, ValueError) as e:
+                print(f"⚠️ Ошибка загрузки категории: {e}")
         
-        # Настройки веб-сервера для health check (Render)
-        # PORT переменная автоматически устанавливается Render
-        self.port = int(os.getenv("PORT", "10000"))
-        self.host = "0.0.0.0"  # Обязательно для Render
-        
-        # Фразы похвалы
-        self.praise_phrases = [
-            "Отлично! Вижу, вы подходите к делу серьезно 👏",
-            "Прекрасный ответ! Это многое проясняет 💡",
-            "Замечательно! Вы раскрываетесь с каждой минутой 🌟",
-            "Восхитительно! Такие ответы делают анализ максимально точным 🎯",
-            "Браво! Вы мыслите нестандартно, это ценно 🚀",
-            "Потрясающе! Чувствуется глубина мышления 🧠",
-            "Великолепно! Вы делаете эту анкету лучше с каждым ответом 💎",
-            "Изумительно! Такой анализ будет максимально персонализированным ✨",
-            "Превосходно! Вижу системный подход к самоанализу 📊",
-            "Блестяще! Ваши ответы - золотая жила для подбора ниши 🏆",
-        ]
-        
-        # Логируем конфигурацию (без ключей!)
-        logger.info("📋 Конфигурация загружена")
-        logger.info(f"  • Python: {os.sys.version}")
-        logger.info(f"  • Telegram Bot: {'✅' if self.telegram_token else '❌'}")
-        logger.info(f"  • OpenAI: {'✅' if self.openai_api_key else '⚠️ (базовый режим)'}")
-        logger.info(f"  • Port: {self.port}")
-        logger.info(f"  • Host: {self.host}")
-        logger.info(f"  • Data dir: {self.data_dir}")
+        print(f"✅ Конфигурация загружена из {logger_method} файла")
+        print(f"   📋 Вопросов: {len(self.questions)}")
+        print(f"   📊 Категорий ниш: {len(self.niche_categories)}")
     
     def validate(self) -> bool:
-        """Валидация конфигурации"""
-        errors = []
-        
+        """Проверка корректности конфигурации"""
         if not self.telegram_token:
-            errors.append("TELEGRAM_BOT_TOKEN не найден в переменных окружения")
-        
-        if errors:
-            for error in errors:
-                logger.error(f"❌ {error}")
+            print("❌ Ошибка: TELEGRAM_BOT_TOKEN не установлен")
             return False
         
-        logger.info("✅ Конфигурация валидна")
+        if len(self.questions) == 0:
+            print("❌ Ошибка: Не загружены вопросы анкеты")
+            return False
+        
         return True
     
-    def get_questions_path(self) -> Path:
-        """Получить путь к файлу вопросов"""
-        return self.base_dir / "config" / "questions.yaml"
+    def get_question_by_id(self, question_id: str) -> Optional[Dict[str, Any]]:
+        """Получить вопрос по ID"""
+        for question in self.questions:
+            if question.get('id') == question_id:
+                return question
+        return None
     
-    def get_prompts_dir(self) -> Path:
-        """Получить путь к папке с промтами"""
-        return self.base_dir / "config" / "prompts"
+    def get_category_name(self, category_id: str) -> str:
+        """Получить название категории по ID"""
+        return self.question_categories.get(category_id, f"Категория {category_id}")
+    
+    def get_niche_category_by_id(self, category_id: str) -> Optional[NicheCategory]:
+        """Получить категорию ниши по ID"""
+        for category in self.niche_categories:
+            if category.id == category_id:
+                return category
+        return None
+
+# Создаем глобальный экземпляр конфигурации
+config = BotConfig()
