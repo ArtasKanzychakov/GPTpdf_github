@@ -33,31 +33,51 @@ async def main():
         # Загрузка конфигурации
         config = BotConfig()
         
-        if not config.validate():
-            logger.error("❌ Ошибка конфигурации")
+        # Проверяем наличие обязательных переменных
+        if not config.telegram_token:
+            logger.error("❌ TELEGRAM_BOT_TOKEN не найден!")
+            logger.error("Добавьте переменную в настройках Render:")
+            logger.error("1. TELEGRAM_BOT_TOKEN=ваш_токен_бота")
+            logger.error("2. Получите токен у @BotFather в Telegram")
             sys.exit(1)
         
-        # Проверка OpenAI
+        if not config.openai_api_key:
+            logger.warning("⚠️ OPENAI_API_KEY не найден. Будет работать базовый режим без AI.")
+        
+        # Проверка OpenAI (если ключ есть)
         if config.openai_api_key:
             from services.openai_service import OpenAIService
             openai_service = OpenAIService(config)
-            if await openai_service.check_availability():
-                logger.info("✅ OpenAI доступен")
+            
+            # Асинхронная проверка доступности
+            logger.info("🔍 Проверяем подключение к OpenAI...")
+            available, info = await openai_service.check_availability()
+            
+            if available:
+                logger.info(f"✅ OpenAI доступен: {info}")
             else:
-                logger.warning("⚠️ OpenAI недоступен, включен тестовый режим")
+                logger.warning(f"⚠️ OpenAI проблемы: {info}")
+                logger.warning("Будет работать в базовом режиме")
+        else:
+            logger.info("🤖 OpenAI отключен, используется базовый режим")
         
         # Создание и запуск бота
         logger.info("🚀 Запуск Бизнес-Навигатора v7.0...")
         bot = BusinessNavigatorBot(config)
         
-        # Запуск health check сервера (для Render)
+        # Запуск health check сервера (для Render) в фоне
         from services.health_check import start_health_check_server
-        health_task = asyncio.create_task(start_health_check_server())
+        health_task = asyncio.create_task(
+            start_health_check_server(host=config.host, port=config.port)
+        )
+        
+        logger.info(f"🌐 Health check сервер запущен на порту {config.port}")
+        logger.info("🤖 Бот запускается в режиме polling...")
         
         # Запуск бота
         await bot.run()
         
-        # Ожидание завершения
+        # Ожидание завершения (в теории не должно сюда дойти)
         await health_task
         
     except KeyboardInterrupt:
@@ -67,5 +87,9 @@ async def main():
         sys.exit(1)
 
 if __name__ == '__main__':
+    # Проверяем, что мы на Render (есть переменная PORT)
+    port = os.getenv('PORT', '10000')
+    logger.info(f"Порт из окружения: {port}")
+    
     # Запуск асинхронного event loop
     asyncio.run(main())
