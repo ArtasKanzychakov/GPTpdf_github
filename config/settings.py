@@ -10,48 +10,48 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-# ИСПРАВЛЕННЫЙ ИМПОРТ - NicheDetails находится в enums, не в session
+# ИСПРАВЛЕННЫЙ ИМПОРТ - импортируем оба класса из enums
 from models.enums import NicheCategory, NicheDetails
 
 @dataclass
 class BotConfig:
     """Конфигурация бота"""
-    
+
     # Токены и ключи
     telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_BOT_TOKEN', ''))
     openai_api_key: str = field(default_factory=lambda: os.getenv('OPENAI_API_KEY', ''))
-    
+
     # Настройки сервера
     host: str = field(default_factory=lambda: os.getenv('HOST', '0.0.0.0'))
     port: int = field(default_factory=lambda: int(os.getenv('PORT', '10000')))
-    
+
     # Настройки OpenAI
     openai_model: str = field(default_factory=lambda: os.getenv('OPENAI_MODEL', 'gpt-4-turbo-preview'))
     openai_temperature: float = field(default_factory=lambda: float(os.getenv('OPENAI_TEMPERATURE', '0.7')))
     openai_max_tokens: int = field(default_factory=lambda: int(os.getenv('OPENAI_MAX_TOKENS', '2000')))
-    
+
     # Настройки бота
     bot_language: str = field(default_factory=lambda: os.getenv('BOT_LANGUAGE', 'ru'))
     cleanup_hours: int = field(default_factory=lambda: int(os.getenv('CLEANUP_HOURS', '24')))
     max_questions: int = field(default_factory=lambda: int(os.getenv('MAX_QUESTIONS', '18')))
-    
+
     # Данные вопросов
     questions: List[Dict[str, Any]] = field(default_factory=list)
     question_categories: Dict[str, str] = field(default_factory=dict)
     niche_categories: List[NicheDetails] = field(default_factory=list)  # Теперь NicheDetails вместо NicheCategory
-    
+
     def __post_init__(self):
         """Загрузка вопросов после инициализации"""
         # Определяем путь к файлу с вопросами
         config_dir = Path(__file__).parent
-        
+
         # Сначала ищем questions.json
         json_path = config_dir / 'questions.json'
         yaml_path = config_dir / 'questions.yaml'
-        
+
         questions_path = None
         file_format = ""
-        
+
         if json_path.exists():
             questions_path = json_path
             file_format = "JSON"
@@ -76,7 +76,7 @@ class BotConfig:
             )
             print(error_msg)
             raise FileNotFoundError(f"Файл с вопросами не найден в {config_dir}")
-        
+
         # Загружаем вопросы
         try:
             with open(questions_path, 'r', encoding='utf-8') as f:
@@ -84,31 +84,38 @@ class BotConfig:
                     data = json.load(f)
                 else:  # YAML
                     data = yaml.safe_load(f)
-            
+
             # Извлекаем данные
             self.questions = data.get('questions', [])
             self.question_categories = data.get('categories', {})
-            
+
             # Загрузка ниш с использованием NicheCategory Enum
             niche_categories_data = data.get('niche_categories', [])
             self.niche_categories = []
-            
+
             for category_data in niche_categories_data:
                 try:
                     category_id = category_data['id']
-                    
+
                     # Ищем соответствующий Enum
                     niche_enum = None
                     for enum_item in NicheCategory:
                         if enum_item.name == category_id:
                             niche_enum = enum_item
                             break
-                    
+
+                    if not niche_enum:
+                        # Если не нашли по name, пробуем по value
+                        for enum_item in NicheCategory:
+                            if enum_item.value == category_id or str(enum_item.value) == category_id:
+                                niche_enum = enum_item
+                                break
+
                     if not niche_enum:
                         print(f"⚠️ Категория '{category_id}' не найдена в NicheCategory Enum")
                         print(f"   Доступные значения: {[e.name for e in NicheCategory]}")
                         continue
-                    
+
                     # Создаем объект NicheDetails
                     niche_details = NicheDetails(
                         id=category_id,
@@ -123,17 +130,17 @@ class BotConfig:
                         success_rate=category_data.get('success_rate', 0.5),
                         examples=category_data.get('examples', [])
                     )
-                    
+
                     self.niche_categories.append(niche_details)
-                    
+
                 except (KeyError, ValueError) as e:
                     print(f"⚠️ Ошибка загрузки категории: {e}")
                     print(f"   Данные категории: {category_data}")
-            
+
             print(f"✅ Конфигурация загружена из {file_format} файла")
             print(f"   📋 Вопросов: {len(self.questions)}")
             print(f"   📊 Категорий ниш: {len(self.niche_categories)}")
-            
+
             # ДЕБАГ: выводим информацию о вопросах
             if len(self.questions) > 0:
                 print(f"\n📝 Первые {min(3, len(self.questions))} вопроса:")
@@ -144,7 +151,7 @@ class BotConfig:
                     print(f"   {i+1}. [{q_id}] {q_text}... (тип: {q_type})")
             else:
                 print("⚠️ Вопросы не загружены или список пуст!")
-                
+
             # ДЕБАГ: выводим информацию о категориях ниш
             if len(self.niche_categories) > 0:
                 print(f"\n🏢 Категории ниш ({len(self.niche_categories)}):")
@@ -156,7 +163,7 @@ class BotConfig:
                     print(f"   ... и ещё {len(self.niche_categories) - 5}")
             else:
                 print("⚠️ Категории ниш не загружены!")
-                
+
         except json.JSONDecodeError as e:
             print(f"❌ Ошибка парсинга JSON: {e}")
             print(f"   Проверьте синтаксис файла {questions_path}")
@@ -168,28 +175,28 @@ class BotConfig:
             traceback.print_exc()
             self.questions = []
             self.niche_categories = []
-    
+
     def validate(self) -> bool:
         """Проверка корректности конфигурации"""
         errors = []
-        
+
         if not self.telegram_token:
             errors.append("TELEGRAM_BOT_TOKEN не установлен")
-        
+
         if len(self.questions) == 0:
             errors.append("Не загружены вопросы анкеты")
         elif len(self.questions) < self.max_questions:
             errors.append(f"Загружено только {len(self.questions)} вопросов из {self.max_questions}")
-        
+
         if errors:
             print("❌ Ошибки конфигурации:")
             for error in errors:
                 print(f"   - {error}")
             return False
-        
+
         print("✅ Конфигурация прошла проверку")
         return True
-    
+
     def get_question_by_id(self, question_id: str) -> Optional[Dict[str, Any]]:
         """Получить вопрос по ID"""
         for question in self.questions:
@@ -197,11 +204,11 @@ class BotConfig:
                 return question
         print(f"⚠️ Вопрос с ID '{question_id}' не найден")
         return None
-    
+
     def get_category_name(self, category_id: str) -> str:
         """Получить название категории по ID"""
         return self.question_categories.get(category_id, f"Категория {category_id}")
-    
+
     def get_niche_by_id(self, niche_id: str) -> Optional[NicheDetails]:
         """Получить детали ниши по ID"""
         for niche in self.niche_categories:
@@ -209,40 +216,40 @@ class BotConfig:
                 return niche
         print(f"⚠️ Ниша с ID '{niche_id}' не найдена")
         return None
-    
+
     def get_niche_by_enum(self, niche_enum: NicheCategory) -> Optional[NicheDetails]:
         """Получить детали ниши по Enum значению"""
         for niche in self.niche_categories:
             if niche.category == niche_enum:
                 return niche
         return None
-    
+
     def get_question_by_index(self, index: int) -> Optional[Dict[str, Any]]:
         """Получить вопрос по индексу"""
         if 0 <= index < len(self.questions):
             return self.questions[index]
         return None
-    
+
     def get_total_questions(self) -> int:
         """Получить общее количество вопросов"""
         return len(self.questions)
-    
+
     def get_niche_categories_for_user(self, user_skills: List[str], user_risk_tolerance: int) -> List[NicheDetails]:
         """Получить подходящие ниши для пользователя на основе навыков и толерантности к риску"""
         suitable_niches = []
-        
+
         for niche in self.niche_categories:
             # Фильтрация по риску (разница не больше 2 баллов)
             if abs(niche.risk_level - user_risk_tolerance) <= 2:
                 suitable_niches.append(niche)
-        
+
         # Сортировка по соответствию навыкам
         if suitable_niches and niche.required_skills:
             suitable_niches.sort(
                 key=lambda n: len(set(n.required_skills) & set(user_skills)),
                 reverse=True
             )
-        
+
         return suitable_niches
 
 # Создаем глобальный экземпляр конфигурации
