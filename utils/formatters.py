@@ -1,133 +1,184 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Форматирование текста для вывода
+Утилиты для форматирования текста и клавиатур
 """
-import random
-from typing import Dict, List
 
-def get_random_praise() -> str:
-    """Получить случайную фразу похвалы"""
-    praise_phrases = [
-        "Отлично! Вижу, вы подходите к делу серьезно 👏",
-        "Прекрасный ответ! Это многое проясняет 💡",
-        "Замечательно! Вы раскрываетесь с каждой минутой 🌟",
-        "Восхитительно! Такие ответы делают анализ максимально точным 🎯",
-        "Браво! Вы мыслите нестандартно, это ценно 🚀",
-        "Потрясающе! Чувствуется глубина мышления 🧠",
-        "Великолепно! Вы делаете эту анкету лучше с каждым ответом 💎",
-        "Изумительно! Такой анализ будет максимально персонализированным ✨",
+import logging
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+
+# КРИТИЧЕСКИ ВАЖНЫЙ ИМПОРТ: добавляем классы Telegram
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ParseMode
+
+from models.session import UserSession
+from models.enums import NicheCategory
+
+logger = logging.getLogger(__name__)
+
+def format_question_text(text: str, user_name: str, current_q: int, total_q: int) -> str:
+    """
+    Форматирование текста вопроса
+    
+    Args:
+        text: Текст вопроса
+        user_name: Имя пользователя
+        current_q: Номер текущего вопроса
+        total_q: Общее количество вопросов
+    
+    Returns:
+        Отформатированный текст
+    """
+    # Заменяем плейсхолдеры
+    formatted_text = text.replace("{user_name}", user_name)
+    
+    # Добавляем прогресс
+    progress_bar = create_progress_bar(current_q, total_q)
+    progress_text = f"\n\n📊 *Прогресс:* {current_q}/{total_q}\n{progress_bar}"
+    
+    return formatted_text + progress_text
+
+def create_progress_bar(current: int, total: int, length: int = 10) -> str:
+    """
+    Создание текстового прогресс-бара
+    
+    Args:
+        current: Текущая позиция
+        total: Всего шагов
+        length: Длина прогресс-бара в символах
+    
+    Returns:
+        Строка прогресс-бара
+    """
+    filled = int((current / total) * length)
+    empty = length - filled
+    return "▓" * filled + "░" * empty
+
+def format_recommendations(recommendations: str, user_name: str) -> str:
+    """
+    Форматирование рекомендаций
+    
+    Args:
+        recommendations: Текст рекомендаций
+        user_name: Имя пользователя
+    
+    Returns:
+        Отформатированные рекомендации
+    """
+    header = f"🎯 *Персонализированные рекомендации для {user_name}*\n\n"
+    footer = "\n\n---\n🤖 *Создано Бизнес-Навигатором v7.0*"
+    
+    return header + recommendations + footer
+
+def format_session_summary(session: UserSession) -> str:
+    """
+    Форматирование сводки сессии
+    
+    Args:
+        session: Сессия пользователя
+    
+    Returns:
+        Текст сводки
+    """
+    summary = [
+        f"👤 *Пользователь:* {session.user_name}",
+        f"🆔 *ID:* {session.user_id}",
+        f"📅 *Создана:* {session.created_at.strftime('%Y-%m-%d %H:%M')}",
+        f"📝 *Вопросов пройдено:* {session.current_question_index}/18",
+        f"🔄 *Состояние:* {session.current_state.value}"
     ]
-    return random.choice(praise_phrases)
-
-def format_progress_header(session) -> str:
-    """Форматировать заголовок с прогрессом"""
-    progress_bar = session.get_progress_bar()
-    question_num = session.current_question
     
-    emojis = ["🔴", "🟠", "🟡", "🟢", "🔵", "🟣"]
-    emoji = emojis[min(question_num - 1, len(emojis) - 1)] if question_num > 0 else "🟢"
+    if session.completed_at:
+        summary.append(f"✅ *Завершена:* {session.completed_at.strftime('%Y-%m-%d %H:%M')}")
     
-    return f"{emoji} *Вопрос {question_num}/{session.total_questions}*\n{progress_bar}\n\n"
+    return "\n".join(summary)
 
-def format_niche(niche: Dict, index: int, total: int) -> str:
-    """Форматировать нишу для отображения"""
-    steps_text = "\n".join([f"{i+1}. {step}" for i, step in enumerate(niche.get('steps', [])[:3])])
+def create_niche_navigation(session: UserSession) -> InlineKeyboardMarkup:
+    """
+    Создание навигационной клавиатуры для выбора ниши
     
-    return f"""🎯 *НИША {index} из {total}*
-
-{niche.get('type', '🔥 Ниша')}
-
-*{niche.get('name', 'Название')}*
-
-📝 *Суть:*
-{niche.get('description', 'Описание')}
-
-✅ *Почему вам подходит:*
-{niche.get('why', 'Соответствует вашему профилю')}
-
-📊 *Детали:*
-• Формат: {niche.get('format', 'Гибрид')}
-• Инвестиции: {niche.get('investment', '50,000-100,000₽')}
-• Окупаемость: {niche.get('roi', '3-6 месяцев')}
-
-🚀 *Первые шаги:*
-{steps_text}"""
-
-def format_analysis(analysis: str) -> str:
-    """Форматировать анализ для отображения"""
-    # Ограничиваем длину для Telegram
-    max_length = 4000
+    Args:
+        session: Сессия пользователя
     
-    if len(analysis) > max_length:
-        analysis = analysis[:max_length] + "...\n\n📝 *Анализ продолжается в сохраненных файлах*"
+    Returns:
+        InlineKeyboardMarkup для навигации
+    """
+    # Это заглушка - в реальном проекте здесь будет логика создания кнопок
+    # на основе категорий ниш из конфига
     
-    return f"""🧠 *ПСИХОЛОГИЧЕСКИЙ АНАЛИЗ*
-
-{analysis}"""
-
-def create_niche_navigation(session) -> InlineKeyboardMarkup:
-    """Создать клавиатуру навигации по нишам"""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    
-    keyboard = []
-    
-    if session.generated_niches:
-        current_idx = session.selected_niche_index
-        total = len(session.generated_niches)
-        
-        # Кнопки навигации
-        nav_buttons = []
-        if current_idx > 0:
-            nav_buttons.append(InlineKeyboardButton("◀️ Предыдущая", callback_data="niche_prev"))
-        
-        nav_buttons.append(InlineKeyboardButton(f"{current_idx + 1}/{total}", callback_data="niche_current"))
-        
-        if current_idx < total - 1:
-            nav_buttons.append(InlineKeyboardButton("Следующая ▶️", callback_data="niche_next"))
-        
-        if nav_buttons:
-            keyboard.append(nav_buttons)
-        
-        # Кнопки действий
-        current_niche = session.generated_niches[current_idx]
-        niche_id = current_niche.get('id', current_idx + 1)
-        
-        keyboard.append([
-            InlineKeyboardButton("📋 Детальный план", callback_data=f"plan_{niche_id}")
-        ])
-    
-    # Общие кнопки
-    keyboard.append([
-        InlineKeyboardButton("🧠 Психологический анализ", callback_data="show_analysis"),
-        InlineKeyboardButton("💾 Сохранить все", callback_data="save_all")
-    ])
-    
-    keyboard.append([
-        InlineKeyboardButton("🔄 Начать заново", callback_data="start_over"),
-        InlineKeyboardButton("📊 Статистика", callback_data="show_stats")
-    ])
+    keyboard = [
+        [InlineKeyboardButton("🏢 IT и технологии", callback_data="niche_it")],
+        [InlineKeyboardButton("🛍️ Электронная коммерция", callback_data="niche_ecommerce")],
+        [InlineKeyboardButton("📱 Мобильные приложения", callback_data="niche_mobile")],
+        [InlineKeyboardButton("🎨 Креативные услуги", callback_data="niche_creative")],
+        [InlineKeyboardButton("📊 Консалтинг", callback_data="niche_consulting")],
+    ]
     
     return InlineKeyboardMarkup(keyboard)
 
-def split_message(text: str, max_length: int = 4000) -> List[str]:
-    """Разделить длинное сообщение на части"""
-    if len(text) <= max_length:
-        return [text]
+def format_answer_summary(answers: Dict[str, Any]) -> str:
+    """
+    Форматирование сводки ответов
     
-    parts = []
-    while text:
-        if len(text) <= max_length:
-            parts.append(text)
-            break
-        
-        # Ищем последний перенос строки перед max_length
-        split_pos = text.rfind('\n', 0, max_length)
-        if split_pos == -1:
-            # Ищем последний пробел
-            split_pos = text.rfind(' ', 0, max_length)
-            if split_pos == -1:
-                split_pos = max_length
-        
-        parts.append(text[:split_pos].strip())
-        text = text[split_pos:].strip()
+    Args:
+        answers: Словарь с ответами пользователя
     
-    return parts
+    Returns:
+        Отформатированная сводка
+    """
+    if not answers:
+        return "📭 Ответы пока не получены"
+    
+    summary_lines = ["📋 *Сводка ответов:*"]
+    
+    for i, (question_id, answer) in enumerate(answers.items(), 1):
+        # Обрезаем длинные ответы
+        if isinstance(answer, str) and len(answer) > 50:
+            answer_display = answer[:50] + "..."
+        elif isinstance(answer, list):
+            answer_display = ", ".join(map(str, answer[:3]))
+            if len(answer) > 3:
+                answer_display += f" и ещё {len(answer) - 3}"
+        else:
+            answer_display = str(answer)
+        
+        summary_lines.append(f"{i}. *Вопрос {question_id}:* {answer_display}")
+    
+    return "\n".join(summary_lines)
+
+def create_restart_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создание клавиатуры для перезапуска
+    
+    Returns:
+        InlineKeyboardMarkup с кнопкой перезапуска
+    """
+    keyboard = [
+        [InlineKeyboardButton("🔄 Начать заново", callback_data="restart_confirm")],
+        [InlineKeyboardButton("❌ Отмена", callback_data="restart_cancel")]
+    ]
+    
+    return InlineKeyboardMarkup(keyboard)
+
+def format_openai_usage(usage: Dict[str, Any]) -> str:
+    """
+    Форматирование информации об использовании OpenAI
+    
+    Args:
+        usage: Словарь с данными использования
+    
+    Returns:
+        Отформатированная информация
+    """
+    if not usage:
+        return "📊 *Использование OpenAI:* данные недоступны"
+    
+    return (
+        f"📊 *Использование OpenAI:*\n"
+        f"• Запросов: {usage.get('requests', 0)}\n"
+        f"• Токены: {usage.get('tokens', 0)}\n"
+        f"• Стоимость: ${usage.get('cost', 0):.4f}"
+    )
+
+# Если нужно, добавьте другие функции форматирования
