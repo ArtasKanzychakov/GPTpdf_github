@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from models.enums import NicheCategory
-from models.session import NicheDetails  # Новый импорт
+# ИСПРАВЛЕННЫЙ ИМПОРТ - NicheDetails находится в enums, не в session
+from models.enums import NicheCategory, NicheDetails
 
 @dataclass
 class BotConfig:
@@ -89,7 +89,7 @@ class BotConfig:
             self.questions = data.get('questions', [])
             self.question_categories = data.get('categories', {})
             
-            # ИСПРАВЛЕННАЯ ЧАСТЬ: Загрузка ниш с использованием NicheCategory Enum
+            # Загрузка ниш с использованием NicheCategory Enum
             niche_categories_data = data.get('niche_categories', [])
             self.niche_categories = []
             
@@ -120,7 +120,8 @@ class BotConfig:
                         time_to_profit=category_data.get('time_to_profit', ''),
                         required_skills=category_data.get('required_skills', []),
                         min_budget=category_data.get('min_budget', 0),
-                        success_rate=category_data.get('success_rate', 0.5)
+                        success_rate=category_data.get('success_rate', 0.5),
+                        examples=category_data.get('examples', [])
                     )
                     
                     self.niche_categories.append(niche_details)
@@ -231,12 +232,12 @@ class BotConfig:
         suitable_niches = []
         
         for niche in self.niche_categories:
-            # Фильтрация по риску
+            # Фильтрация по риску (разница не больше 2 баллов)
             if abs(niche.risk_level - user_risk_tolerance) <= 2:
                 suitable_niches.append(niche)
         
-        # Сортировка по соответствию навыкам (если есть информация о требуемых навыках)
-        if suitable_niches and hasattr(suitable_niches[0], 'required_skills'):
+        # Сортировка по соответствию навыкам
+        if suitable_niches and niche.required_skills:
             suitable_niches.sort(
                 key=lambda n: len(set(n.required_skills) & set(user_skills)),
                 reverse=True
