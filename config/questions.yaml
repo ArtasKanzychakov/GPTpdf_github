@@ -1,0 +1,123 @@
+version: "2.0"
+total_questions: 18
+questions:
+  # Часть 1: ДЕМОГРАФИЯ И БАЗА (3 вопроса)
+  - id: 1
+    part: 1
+    text: "🔢 *ВОПРОС 1/18: ВАШ ВОЗРАСТ*\n\nВыберите вашу возрастную группу:"
+    type: "buttons"
+    options:
+      - text: "18-25 лет"
+        value: "age_18-25"
+        store_field: "age_group"
+      - text: "26-35 лет"
+        value: "age_26-35"
+        store_field: "age_group"
+      - text: "36-45 лет"
+        value: "age_36-45"
+        store_field: "age_group"
+      - text: "46+ лет"
+        value: "age_46+"
+        store_field: "age_group"
+    next_question: 2
+  
+  - id: 2
+    part: 1
+    text: "🎓 *ВОПРОС 2/18: ВАШЕ ОБРАЗОВАНИЕ*\n\nВыберите ваш образовательный уровень:"
+    type: "buttons"
+    options:
+      - text: "Среднее"
+        value: "edu_school"
+        store_field: "education"
+      - text: "Среднее специальное"
+        value: "edu_college"
+        store_field: "education"
+      - text: "Неоконченное высшее"
+        value: "edu_incomplete"
+        store_field: "education"
+      - text: "Высшее (бакалавр)"
+        value: "edu_bachelor"
+        store_field: "education"
+      - text: "Высшее (магистр/специалист)"
+        value: "edu_master"
+        store_field: "education"
+      - text: "Два и более высших"
+        value: "edu_multiple"
+        store_field: "education"
+      - text: "MBA/аспирантура"
+        value: "edu_mba"
+        store_field: "education"
+      - text: "Самообразование"
+        value: "edu_self"
+        store_field: "education"
+    next_question: 3
+  
+  - id: 3
+    part: 1
+    text: "🏙️ *ВОПРОС 3/18: ВАШ ГОРОД/РЕГИОН*\n\nВыберите тип вашего населенного пункта:"
+    type: "buttons"
+    options:
+      - text: "Москва"
+        value: "loc_moscow"
+        store_field: "location_type"
+        location: "Москва"
+      - text: "Санкт-Петербург"
+        value: "loc_spb"
+        store_field: "location_type"
+        location: "Санкт-Петербург"
+      - text: "Город-миллионник"
+        value: "loc_million"
+        store_field: "location_type"
+        location: "Город-миллионник"
+      - text: "Областной центр"
+        value: "loc_region"
+        store_field: "location_type"
+        location: "Областной центр"
+      - text: "Малый город"
+        value: "loc_small"
+        store_field: "location_type"
+        location: "Малый город"
+      - text: "Село/деревня"
+        value: "loc_village"
+        store_field: "location_type"
+        location: "Село/деревня"
+      - text: "Другое (напишу)"
+        value: "loc_custom"
+        store_field: "location_type"
+        is_custom: true
+        custom_prompt: "🏙️ *ВОПРОС 3/18 (продолжение): НАЗВАНИЕ ВАШЕГО ГОРОДА*\n\nНапишите название вашего города или региона:"
+        custom_field: "location_custom"
+    next_question: 4
+  
+  - id: 4
+    part: 2
+    text: "🎯 *ВОПРОС 4/18: КЛЮЧЕВАЯ МОТИВАЦИЯ*\n\nЧто для вас ВАЖНЕЕ ВСЕГО в бизнесе?\nВыберите 2-3 самых важных пункта:"
+    type: "multiselect"
+    min_selections: 2
+    max_selections: 3
+    options:
+      - text: "Свобода и независимость"
+        value: "mot_freedom"
+        store_field: "motivations"
+      - text: "Стабильный высокий доход"
+        value: "mot_money"
+        store_field: "motivations"
+      - text: "Помощь людям"
+        value: "mot_help"
+        store_field: "motivations"
+      - text: "Творческая реализация"
+        value: "mot_creative"
+        store_field: "motivations"
+      - text: "Решение сложных вызовов"
+        value: "mot_challenge"
+        store_field: "motivations"
+      - text: "Признание, статус"
+        value: "mot_status"
+        store_field: "motivations"
+      - text: "Баланс работы и жизни"
+        value: "mot_balance"
+        store_field: "motivations"
+      - text: "Наследие, долгосрочный проект"
+        value: "mot_legacy"
+        store_field: "motivations"
+    next_question: 5
