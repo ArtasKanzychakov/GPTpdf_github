@@ -1,7 +1,7 @@
 services:
   - type: web
     name: business-navigator-bot
-    runtime: dockerfile  # Это самое важное
+    runtime: docker  # Это самое важное
     plan: free
     dockerfilePath: ./Dockerfile
     envVars:
