@@ -1,283 +1,514 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Логика работы с анкетой
+Обработчики вопросов анкеты
 """
+
 import logging
-import asyncio
-from typing import Optional
+from typing import Dict, Any, Optional, List
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
-from telegram import Update
-from telegram.ext import ContextTypes
-
-from models.enums import BotState
+from models.enums import BotState, QuestionType
 from models.session import UserSession
-from services.data_manager import DataManager
-from services.openai_service import OpenAIService
-from core.question_engine import QuestionEngine
-from utils.formatters import get_random_praise
+from config.settings import config
+from core.question_engine import question_engine
+from services.data_manager import data_manager
+from utils.formatters import format_question_text
 
 logger = logging.getLogger(__name__)
 
-class QuestionnaireHandler:
-    """Обработчик анкеты"""
+# Глобальные переменные для управления состоянием мультиселекта
+user_multiselect_states = {}  # {user_id: {'selected': [], 'question': {}}}
+
+async def start_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начать анкету"""
+    user = update.effective_user
+    user_id = user.id
     
-    def __init__(self, data_manager: DataManager, openai_service: Optional[OpenAIService], question_engine: QuestionEngine):
-        self.data_manager = data_manager
-        self.openai_service = openai_service
-        self.question_engine = question_engine
+    logger.info(f"Начало анкеты для пользователя {user_id} ({user.username})")
     
-    async def start_questionnaire(self, query, session: UserSession):
-        """Начать анкету"""
-        session.current_state = BotState.DEMOGRAPHY
-        session.current_question = 1
-        session.questions_answered = 0
-        
-        await self._ask_question(query, session, 1)
-    
-    async def handle_callback(self, query, session: UserSession, callback_data: str):
-        """Обработать callback анкеты"""
-        question_id = session.current_question
-        question = self.question_engine.get_question(question_id)
-        
-        if not question:
-            logger.error(f"Вопрос {question_id} не найден")
-            await query.edit_message_text("❌ Ошибка: вопрос не найден")
-            return
-        
-        # Обрабатываем ответ
-        success, error_msg, next_question_id = self.question_engine.process_answer(
-            question, callback_data, session
+    # Получаем или создаем сессию
+    session = data_manager.get_session(user_id)
+    if not session:
+        session = UserSession(
+            user_id=user_id,
+            username=user.username or "",
+            full_name=user.full_name or ""
         )
-        
-        if not success:
-            if error_msg:
-                await query.answer(error_msg, show_alert=True)
+        data_manager.save_session(session)
+    
+    # Сбрасываем состояние анкеты
+    session.current_state = BotState.DEMOGRAPHY
+    session.current_question_index = 0
+    session.is_completed = False
+    session.completion_date = None
+    
+    # Приветственное сообщение
+    welcome_text = (
+        "👋 *Добро пожаловать в Бизнес-Навигатор v7.0!*\n\n"
+        "Я помогу вам найти идеальную бизнес-нишу на основе вашей личности, "
+        "навыков и целей.\n\n"
+        "📋 *Предстоит 35 вопросов* в 5 частях:\n"
+        "1. 📊 Демография (3 вопроса)\n"
+        "2. 🧠 Личность (11 вопросов)\n"
+        "3. 🔧 Навыки (9 вопросов)\n"
+        "4. 🌟 Ценности (7 вопросов)\n"
+        "5. 🚫 Ограничения (5 вопросов)\n\n"
+        "⚠️ *Важно:* Отвечайте честно и подробно. "
+        "Каждый ответ влияет на точность рекомендаций.\n\n"
+        "Начинаем с первого вопроса..."
+    )
+    
+    await update.message.reply_text(
+        welcome_text,
+        parse_mode='Markdown'
+    )
+    
+    # Показываем первый вопрос
+    await show_current_question(update, context, session)
+
+async def show_current_question(update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                               session: Optional[UserSession] = None):
+    """Показать текущий вопрос пользователю"""
+    if not session:
+        user_id = update.effective_user.id
+        session = data_manager.get_session(user_id)
+    
+    if not session:
+        await update.message.reply_text("❌ Сессия не найдена. Начните заново: /start")
+        return
+    
+    # Получаем текущий вопрос
+    question = question_engine.get_question_by_index(session.current_question_index)
+    if not question:
+        logger.error(f"Вопрос не найден для индекса {session.current_question_index}")
+        await handle_questionnaire_complete(update, context, session)
+        return
+    
+    # Форматируем текст вопроса
+    question_text = question_engine.get_question_text(question, session)
+    
+    # Получаем подсказку
+    help_text = question_engine.get_help_text(question)
+    if help_text:
+        question_text += f"\n\n💡 *Подсказка:* {help_text}"
+    
+    # Создаем клавиатуру
+    keyboard = question_engine.create_keyboard_for_question(question)
+    
+    # Отправляем вопрос
+    if keyboard:
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                question_text,
+                parse_mode='Markdown',
+                reply_markup=keyboard
+            )
+        else:
+            await update.message.reply_text(
+                question_text,
+                parse_mode='Markdown',
+                reply_markup=keyboard
+            )
+    else:
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                question_text,
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                question_text,
+                parse_mode='Markdown'
+            )
+    
+    # Сохраняем состояние
+    data_manager.save_session(session)
+
+async def handle_text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработать текстовый ответ"""
+    user_id = update.effective_user.id
+    answer_text = update.message.text.strip()
+    
+    session = data_manager.get_session(user_id)
+    if not session:
+        await update.message.reply_text("❌ Сессия не найдена. Начните заново: /start")
+        return
+    
+    # Получаем текущий вопрос
+    question = question_engine.get_question_by_index(session.current_question_index)
+    if not question:
+        await update.message.reply_text("❌ Ошибка: вопрос не найден")
+        return
+    
+    # Проверяем тип вопроса
+    question_type = question.get('type', 'text')
+    
+    if question_type == 'text':
+        # Обработка текстового ответа
+        is_valid, error_msg = question_engine.validate_answer(question, answer_text)
+        if not is_valid:
+            await update.message.reply_text(f"❌ {error_msg}\n\nПопробуйте еще раз:")
             return
         
-        # Если остались на том же вопросе (мультиселект, слайдер)
-        if next_question_id == question_id:
-            await self._update_question_display(query, session, question_id)
-        else:
-            # Переходим к следующему вопросу
-            if next_question_id:
-                session.current_question = next_question_id
-                session.questions_answered += 1
-                session.current_state = self.question_engine.get_state_for_question(next_question_id)
-                
-                await self._ask_question(query, session, next_question_id)
+        # Сохраняем ответ
+        if question_engine.process_answer(session, question, answer_text):
+            # Проверяем, завершена ли анкета
+            if session.is_completed:
+                await handle_questionnaire_complete(update, context, session)
             else:
-                # Анкета завершена
-                await self._finish_questionnaire(query, session)
+                # Показываем следующий вопрос
+                await show_current_question(update, context, session)
+        else:
+            await update.message.reply_text("❌ Ошибка при сохранении ответа")
     
-    async def handle_text_message(self, update: Update, session: UserSession, message_text: str):
-        """Обработать текстовое сообщение"""
-        question_id = session.current_question
-        question = self.question_engine.get_question(question_id)
+    elif question_type == 'slider':
+        # Обработка числового ответа для ползунка
+        try:
+            value = int(answer_text)
+            is_valid, error_msg = question_engine.validate_answer(question, value)
+            if not is_valid:
+                await update.message.reply_text(f"❌ {error_msg}\n\nВведите число:")
+                return
+            
+            # Форматируем значение
+            formatted_value = question_engine.format_slider_value(value, question)
+            
+            # Сохраняем ответ
+            if question_engine.process_answer(session, question, value):
+                await update.message.reply_text(
+                    f"✅ Сохранено: {formatted_value}\n\nПереходим к следующему вопросу..."
+                )
+                
+                if session.is_completed:
+                    await handle_questionnaire_complete(update, context, session)
+                else:
+                    await show_current_question(update, context, session)
+            else:
+                await update.message.reply_text("❌ Ошибка при сохранении ответа")
+                
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Пожалуйста, введите число.\n\n"
+                f"Диапазон: от {question.get('min', 1)} до {question.get('max', 10)}"
+            )
+
+async def handle_button_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработать ответ через кнопку"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    answer_value = query.data
+    
+    session = data_manager.get_session(user_id)
+    if not session:
+        await query.edit_message_text("❌ Сессия не найдена. Начните заново: /start")
+        return
+    
+    # Проверяем, не это ли завершение мультиселекта
+    if answer_value == "multiselect_done":
+        await handle_multiselect_done(update, context, session)
+        return
+    
+    # Получаем текущий вопрос
+    question = question_engine.get_question_by_index(session.current_question_index)
+    if not question:
+        await query.edit_message_text("❌ Ошибка: вопрос не найден")
+        return
+    
+    question_type = question.get('type', 'buttons')
+    
+    if question_type == 'multiselect':
+        # Обработка мультиселекта
+        await handle_multiselect_choice(update, context, session, question, answer_value)
+        return
+    
+    # Обработка обычных кнопок
+    is_valid, error_msg = question_engine.validate_answer(question, answer_value)
+    if not is_valid:
+        await query.edit_message_text(f"❌ {error_msg}")
+        return
+    
+    # Сохраняем ответ
+    if question_engine.process_answer(session, question, answer_value):
+        # Проверяем, есть ли кастомный ввод
+        options = question.get('options', [])
+        for option in options:
+            if option.get('value') == answer_value and option.get('is_custom'):
+                # Запрашиваем кастомный ввод
+                custom_prompt = option.get('custom_prompt', 'Введите значение:')
+                await query.edit_message_text(custom_prompt, parse_mode='Markdown')
+                return
         
-        if not question:
-            logger.error(f"Вопрос {question_id} не найден")
-            return
-        
-        # Обрабатываем текстовый ответ
-        success, error_msg, next_question_id = self.question_engine.process_answer(
-            question, message_text, session
+        # Проверяем, завершена ли анкета
+        if session.is_completed:
+            await handle_questionnaire_complete(update, context, session)
+        else:
+            # Показываем следующий вопрос
+            await show_current_question(update, context, session)
+    else:
+        await query.edit_message_text("❌ Ошибка при сохранении ответа")
+
+async def handle_multiselect_choice(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                   session: UserSession, question: Dict[str, Any], 
+                                   choice_value: str):
+    """Обработать выбор в мультиселекте"""
+    user_id = session.user_id
+    
+    # Убираем префикс "select_"
+    if choice_value.startswith("select_"):
+        choice_value = choice_value[7:]
+    
+    # Инициализируем состояние мультиселекта
+    if user_id not in user_multiselect_states:
+        user_multiselect_states[user_id] = {
+            'selected': [],
+            'question': question,
+            'session': session
+        }
+    
+    state = user_multiselect_states[user_id]
+    selected = state['selected']
+    
+    # Добавляем или удаляем выбор
+    if choice_value in selected:
+        selected.remove(choice_value)
+    else:
+        selected.append(choice_value)
+    
+    # Обновляем клавиатуру
+    keyboard = create_updated_multiselect_keyboard(question, selected)
+    
+    # Обновляем сообщение
+    question_text = question_engine.get_question_text(question, session)
+    help_text = question_engine.get_help_text(question)
+    
+    # Добавляем информацию о выбранных элементах
+    selected_count = len(selected)
+    min_select = question.get('min_selections', 1)
+    max_select = question.get('max_selections', 10)
+    
+    status_text = f"✅ Выбрано: {selected_count} "
+    if min_select == max_select:
+        status_text += f"(нужно {min_select})"
+    else:
+        status_text += f"(нужно от {min_select} до {max_select})"
+    
+    full_text = f"{question_text}\n\n💡 *Подсказка:* {help_text}\n\n{status_text}"
+    
+    await update.callback_query.edit_message_text(
+        full_text,
+        parse_mode='Markdown',
+        reply_markup=keyboard
+    )
+
+async def handle_multiselect_done(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                 session: Optional[UserSession] = None):
+    """Завершить выбор в мультиселекте"""
+    if not session:
+        user_id = update.effective_user.id
+        session = data_manager.get_session(user_id)
+    
+    if not session:
+        return
+    
+    user_id = session.user_id
+    
+    if user_id not in user_multiselect_states:
+        await update.callback_query.edit_message_text("❌ Ошибка: состояние выбора не найдено")
+        return
+    
+    state = user_multiselect_states.pop(user_id, None)
+    if not state:
+        return
+    
+    selected = state['selected']
+    question = state['question']
+    
+    # Проверяем минимальное количество
+    min_select = question.get('min_selections', 1)
+    max_select = question.get('max_selections', 10)
+    
+    if len(selected) < min_select:
+        await update.callback_query.edit_message_text(
+            f"❌ Выберите хотя бы {min_select} вариант(а)\n\nПродолжаем выбор..."
+        )
+        # Восстанавливаем состояние
+        user_multiselect_states[user_id] = state
+        return
+    
+    if len(selected) > max_select:
+        await update.callback_query.edit_message_text(
+            f"❌ Выберите не более {max_select} вариантов\n\nПродолжаем выбор..."
+        )
+        user_multiselect_states[user_id] = state
+        return
+    
+    # Сохраняем ответ
+    if question_engine.process_answer(session, question, selected):
+        await update.callback_query.edit_message_text(
+            f"✅ Сохранено {len(selected)} выборов\n\nПереходим к следующему вопросу..."
         )
         
-        if not success:
-            if error_msg:
-                await update.message.reply_text(f"❌ {error_msg}")
-            return
-        
-        # Переходим к следующему вопросу
-        if next_question_id:
-            session.current_question = next_question_id
-            session.questions_answered += 1
-            session.current_state = self.question_engine.get_state_for_question(next_question_id)
-            
-            await self._ask_question(update, session, next_question_id)
+        # Проверяем, завершена ли анкета
+        if session.is_completed:
+            await handle_questionnaire_complete(update, context, session)
         else:
-            # Анкета завершена
-            await self._finish_questionnaire(update, session)
+            await show_current_question(update, context, session)
+    else:
+        await update.callback_query.edit_message_text("❌ Ошибка при сохранении ответа")
+
+def create_updated_multiselect_keyboard(question: Dict[str, Any], selected: List[str]) -> InlineKeyboardMarkup:
+    """Создать обновленную клавиатуру для мультиселекта"""
+    keyboard = []
+    options = question.get('options', [])
     
-    async def _ask_question(self, target, session: UserSession, question_id: int):
-        """Задать вопрос"""
-        question = self.question_engine.get_question(question_id)
+    for option in options:
+        option_value = option.get('value', '')
+        option_text = option.get('text', '')
         
-        if not question:
-            logger.error(f"Вопрос {question_id} не найден")
-            return
+        # Добавляем или убираем галочку
+        if option_value in selected:
+            display_text = f"✅ {option_text}"
+        else:
+            display_text = f"□ {option_text}"
         
-        # Рендерим вопрос
-        text, keyboard = self.question_engine.render_question(question, session)
-        
-        # Добавляем похвалу
-        praise = get_random_praise()
-        full_text = f"{praise}\n\n{text}"
-        
-        # Отправляем или редактируем сообщение
-        if hasattr(target, 'edit_message_text'):  # Callback query
-            await target.edit_message_text(
-                full_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
-        elif hasattr(target, 'message'):  # Update object
-            await target.message.reply_text(
-                full_text,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
+        keyboard.append([
+            InlineKeyboardButton(display_text, callback_data=f"select_{option_value}")
+        ])
     
-    async def _update_question_display(self, query, session: UserSession, question_id: int):
-        """Обновить отображение вопроса"""
-        question = self.question_engine.get_question(question_id)
-        
-        if not question:
-            return
-        
-        text, keyboard = self.question_engine.render_question(question, session)
-        
-        # Добавляем информацию о выбранных опциях
-        if question.type == "multiselect":
-            selected_count = len(session.temp_multiselect)
-            text += f"\n\n✅ Выбрано: {selected_count}"
-        
-        await query.edit_message_text(
-            text,
-            reply_markup=keyboard,
+    # Кнопка завершения
+    keyboard.append([
+        InlineKeyboardButton("✅ Завершить выбор", callback_data="multiselect_done")
+    ])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+async def handle_questionnaire_complete(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       session: UserSession):
+    """Обработать завершение анкеты"""
+    logger.info(f"Анкета завершена для пользователя {session.user_id}")
+    
+    completion_text = (
+        "🎉 *Поздравляю! Вы завершили анкету!*\n\n"
+        f"✅ Ответов сохранено: 35 из 35\n"
+        f"📊 Прогресс: 100%\n\n"
+        "🔄 *Сейчас происходит анализ ваших ответов...*\n\n"
+        "Я изучаю:\n"
+        "• Ваш психологический профиль\n"
+        "• Сильные стороны и потенциал\n"
+        "• Подходящие бизнес-ниши\n\n"
+        "⏱️ *Это займет около 1-2 минут.*\n"
+        "Как только анализ будет готов, я покажу вам подходящие ниши."
+    )
+    
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            completion_text,
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            completion_text,
             parse_mode='Markdown'
         )
     
-    async def _finish_questionnaire(self, target, session: UserSession):
-        """Завершить анкету"""
-        session.current_state = BotState.ANALYZING
-        
-        # Сохраняем сессию
-        self.data_manager.save_session(session)
-        self.data_manager.mark_profile_completed(session.user_id)
-        
-        finish_text = f"""🎉 *БРАВО! АНКЕТА ЗАВЕРШЕНА!*
-
-{get_random_praise()}
-
-✅ Отвечено: {session.questions_answered} вопросов
-⏱️ Время заполнения: ~{(session.last_activity - session.start_time).seconds // 60} минут
-🎯 Глубина анализа: профессиональный уровень
-
-🤖 *Запускаю AI-анализ...*
-1. Анализирую психологический профиль
-2. Ищу скрытый потенциал  
-3. Подбираю уникальные ниши
-4. Готовлю персонализированные планы
-
-⏳ *Это займет 1-2 минуты*
-Пока AI работает, можете отдохнуть ☕"""
-        
-        if hasattr(target, 'edit_message_text'):  # Callback query
-            await target.edit_message_text(finish_text, parse_mode='Markdown')
-        elif hasattr(target, 'message'):  # Update object
-            await target.message.reply_text(finish_text, parse_mode='Markdown')
-        
-        # Запускаем AI анализ асинхронно
-        asyncio.create_task(self._start_ai_analysis(target, session))
+    # Сохраняем сессию
+    data_manager.save_session(session)
     
-    async def _start_ai_analysis(self, target, session: UserSession):
-        """Запустить AI анализ"""
-        try:
-            if not self.openai_service or not self.openai_service.is_available:
-                await self._use_fallback_data(target, session)
-                return
-            
-            # Генерация психологического анализа
-            analysis = await self.openai_service.generate_psychological_analysis(
-                session.to_openai_dict(),
-                self.data_manager.openai_usage
-            )
-            session.psychological_analysis = analysis
-            
-            # Генерация бизнес-ниш
-            niches = await self.openai_service.generate_business_niches(
-                session.to_openai_dict(),
-                analysis,
-                self.data_manager.openai_usage
-            )
-            session.generated_niches = niches
-            self.data_manager.add_generated_niches(len(niches))
-            
-            # Генерация планов для первых 3 ниш
-            plans_generated = 0
-            for i, niche in enumerate(session.generated_niches[:3]):
-                plan = await self.openai_service.generate_detailed_plan(
-                    session.to_openai_dict(),
-                    niche,
-                    self.data_manager.openai_usage
-                )
-                if plan:
-                    session.detailed_plans[str(niche.get('id', i))] = plan
-                    plans_generated += 1
-                    self.data_manager.add_generated_plan()
-            
-            # Показываем результат
-            stats = self.data_manager.openai_usage
-            stats_text = stats.get_stats_str() if stats.total_requests > 0 else ""
-            
-            result_text = f"""🎉 *АНАЛИЗ ЗАВЕРШЕН!*
+    # Запускаем анализ (будет в отдельном обработчике)
+    from services.openai_service import analyze_user_profile
+    await analyze_user_profile(update, context, session)
 
-✅ Создано: {len(session.generated_niches)} уникальных бизнес-ниш
-📊 Психологический портрет: готов
-📋 Детальные планы: {plans_generated} шт
-
-{stats_text}
-
-👇 *Выберите первую нишу для изучения:*"""
+async def skip_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пропустить вопрос (если разрешено)"""
+    user_id = update.effective_user.id
+    session = data_manager.get_session(user_id)
+    
+    if not session:
+        await update.message.reply_text("❌ Сессия не найдена")
+        return
+    
+    question = question_engine.get_question_by_index(session.current_question_index)
+    if not question:
+        await update.message.reply_text("❌ Вопрос не найден")
+        return
+    
+    # Проверяем, можно ли пропустить
+    if question.get('skippable', False):
+        # Сохраняем пустой ответ
+        if question_engine.process_answer(session, question, ""):
+            await update.message.reply_text("⏭️ Вопрос пропущен")
             
-            # Определяем chat_id
-            if hasattr(target, 'message'):
-                chat_id = target.message.chat_id
-            elif hasattr(target, 'callback_query'):
-                chat_id = target.callback_query.message.chat_id
+            if session.is_completed:
+                await handle_questionnaire_complete(update, context, session)
             else:
-                chat_id = session.chat_id
-            
-            from telegram import Bot
-            bot = Bot(token=self.data_manager.config.telegram_token) if hasattr(self.data_manager, 'config') else None
-            
-            if bot:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=result_text,
-                    parse_mode='Markdown'
-                )
-            
-            session.current_state = BotState.NICHE_SELECTION
-            
-            # Показываем первую нишу
-            from handlers.callbacks import CallbackHandlers
-            # Нужно будет вызвать через основной бот
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка AI анализа: {e}")
-            await self._use_fallback_data(target, session)
+                await show_current_question(update, context, session)
+        else:
+            await update.message.reply_text("❌ Ошибка при пропуске вопроса")
+    else:
+        await update.message.reply_text(
+            "⚠️ Этот вопрос обязателен для ответа.\n"
+            "Пожалуйста, ответьте на него."
+        )
+
+async def show_progress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать прогресс анкеты"""
+    user_id = update.effective_user.id
+    session = data_manager.get_session(user_id)
     
-    async def _use_fallback_data(self, target, session: UserSession):
-        """Использовать запасные данные"""
-        # Создаем базовый анализ
-        from services.openai_service import OpenAIService
-        temp_service = OpenAIService(None)  # Передаем пустой конфиг
-        
-        session.psychological_analysis = temp_service._create_fallback_analysis(session.to_openai_dict())
-        session.generated_niches = temp_service._create_fallback_niches(session.to_openai_dict())
-        
-        result_text = f"""🎉 *АНАЛИЗ ЗАВЕРШЕН (базовый режим)*
+    if not session:
+        await update.message.reply_text("❌ Сессия не найдена. Начните: /start")
+        return
+    
+    progress = session.get_progress_percentage()
+    current_q = session.current_question_index + 1
+    total_q = question_engine.total_questions
+    
+    # Определяем текущую часть
+    if current_q <= 3:
+        part = "Демография"
+    elif current_q <= 12:
+        part = "Личность"
+    elif current_q <= 22:
+        part = "Навыки"
+    elif current_q <= 29:
+        part = "Ценности"
+    else:
+        part = "Ограничения"
+    
+    progress_text = (
+        f"📊 *Прогресс анкеты*\n\n"
+        f"📍 Текущая часть: {part}\n"
+        f"📝 Вопросов пройдено: {current_q - 1}/{total_q}\n"
+        f"🎯 Прогресс: {progress:.1f}%\n\n"
+    )
+    
+    # Прогресс-бар
+    bar_length = 20
+    filled = int(bar_length * progress / 100)
+    bar = "█" * filled + "░" * (bar_length - filled)
+    progress_text += f"[{bar}] {progress:.1f}%\n\n"
+    
+    if session.is_completed:
+        progress_text += "✅ *Анкета завершена!*\nОжидайте результаты анализа..."
+    else:
+        progress_text += "Продолжайте отвечать на вопросы!"
+    
+    await update.message.reply_text(progress_text, parse_mode='Markdown')
 
-✅ Создано: {len(session.generated_niches)} бизнес-ниш
-📊 Использованы стандартные шаблоны
-⚠️ AI временно недоступен
-
-👇 *Выберите первую нишу для изучения:*"""
-        
-        if hasattr(target, 'edit_message_text'):
-            await target.edit_message_text(result_text, parse_mode='Markdown')
-        elif hasattr(target, 'message'):
-            await target.message.reply_text(result_text, parse_mode='Markdown')
-        
-        session.current_state = BotState.NICHE_SELECTION
+# Регистрация обработчиков
+def register_handlers(application):
+    """Зарегистрировать обработчики вопросов"""
+    
+    # Команды
+    application.add_handler(CallbackQueryHandler(handle_button_answer, pattern="^(?!multiselect_).*"))
+    application.add_handler(CallbackQueryHandler(handle_multiselect_choice, pattern="^select_.*"))
+    application.add_handler(CallbackQueryHandler(handle_multiselect_done, pattern="^multiselect_done$"))
+    
+    # Текстовые ответы
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_answer))
+    
+    logger.info("Обработчики вопросов зарегистрированы")
