@@ -1,561 +1,536 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Сервис для работы с OpenAI
-Версия для openai==0.28.1 и Python 3.9.16
+Сервис для работы с OpenAI API
 """
+
 import logging
 import asyncio
-import json
-from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
+from pathlib import Path
 
-import openai
-from openai.error import (
-    OpenAIError, AuthenticationError, RateLimitError, 
-    APIError, ServiceUnavailableError, InvalidRequestError
-)
-import requests
+from openai import AsyncOpenAI
+from telegram import Update
+from telegram.ext import ContextTypes
 
-from config.settings import BotConfig
-from models.session import OpenAIUsage
+from config.settings import config
+from models.session import UserSession, NicheDetails, AnalysisResult
+from models.enums import NicheCategory
+from services.data_manager import data_manager
 
 logger = logging.getLogger(__name__)
 
 class OpenAIService:
-    """Сервис для работы с OpenAI (версия 0.28.1)"""
+    """Сервис для взаимодействия с OpenAI"""
     
-    def __init__(self, config: BotConfig):
-        self.config = config
-        self.is_available = bool(config.openai_api_key)
-        self.last_check = None
-        self.balance_cache = None
-        self.balance_cache_time = None
-        
-        if self.is_available:
-            openai.api_key = config.openai_api_key
-            logger.info("✅ OpenAI клиент инициализирован (v0.28.1)")
-        else:
-            logger.warning("⚠️ OpenAI API ключ не установлен, AI функции отключены")
+    def __init__(self):
+        self.client = None
+        self.is_initialized = False
+        self._init_client()
     
-    async def check_availability(self) -> Tuple[bool, Optional[str]]:
-        """Проверить доступность OpenAI и баланс"""
-        if not self.is_available:
-            return False, "OpenAI API ключ не установлен"
-        
+    def _init_client(self):
+        """Инициализировать клиент OpenAI"""
         try:
-            # Проверяем баланс и доступность
-            balance_info = await self._check_balance_with_timeout()
+            if not config.openai_api_key:
+                logger.error("OPENAI_API_KEY не настроен")
+                self.is_initialized = False
+                return
             
-            if balance_info["available"]:
-                self.last_check = datetime.now()
-                balance_text = balance_info["message"]
-                
-                logger.info(f"✅ OpenAI доступен. {balance_text}")
-                return True, balance_text
-            else:
-                logger.warning(f"⚠️ OpenAI проблемы: {balance_info['message']}")
-                return False, balance_info["message"]
-                
+            self.client = AsyncOpenAI(api_key=config.openai_api_key)
+            self.is_initialized = True
+            logger.info("OpenAI клиент инициализирован")
+            
         except Exception as e:
-            logger.error(f"❌ Ошибка проверки OpenAI: {e}")
-            return False, f"Ошибка подключения: {str(e)}"
+            logger.error(f"Ошибка инициализации OpenAI: {e}")
+            self.is_initialized = False
     
-    async def _check_balance_with_timeout(self, timeout: int = 10) -> Dict[str, Any]:
-        """Проверить баланс с таймаутом"""
-        try:
-            return await asyncio.wait_for(
-                self._check_balance(),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            return {
-                "available": False,
-                "message": "Таймаут при проверке баланса",
-                "balance": None
-            }
-    
-    async def _check_balance(self) -> Dict[str, Any]:
-        """Проверить баланс OpenAI"""
-        if not self.is_available:
-            return {
-                "available": False,
-                "message": "API ключ не установлен",
-                "balance": None
-            }
-        
-        # Проверяем кэш (кешируем на 5 минут)
-        if (self.balance_cache_time and 
-            (datetime.now() - self.balance_cache_time) < timedelta(minutes=5)):
-            return self.balance_cache
+    async def analyze_user_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                  session: UserSession):
+        """Проанализировать профиль пользователя и предложить ниши"""
+        if not self.is_initialized:
+            await self._send_error_message(update, "Сервис анализа временно недоступен")
+            return
         
         try:
-            # Метод 1: Проверка через billing API (для новых аккаунтов)
-            headers = {
-                "Authorization": f"Bearer {openai.api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            response = requests.get(
-                "https://api.openai.com/dashboard/billing/credit_grants",
-                headers=headers,
-                timeout=15
+            # Шаг 1: Психологический анализ
+            await update.effective_message.reply_text(
+                "🔍 *Шаг 1/3: Провожу психологический анализ...*",
+                parse_mode='Markdown'
             )
             
-            if response.status_code == 200:
-                data = response.json()
-                
-                if 'total_granted' in data and 'total_used' in data:
-                    total = data['total_granted']
-                    used = data['total_used']
-                    balance = total - used
-                    
-                    result = {
-                        "available": True,
-                        "message": f"Баланс: ${balance:.2f} (из ${total:.2f})",
-                        "balance": balance,
-                        "total": total,
-                        "used": used
-                    }
-                    
-                    # Кэшируем результат
-                    self.balance_cache = result
-                    self.balance_cache_time = datetime.now()
-                    
-                    return result
+            psychological_analysis = await self._generate_psychological_analysis(session)
+            if psychological_analysis:
+                session.analysis_result = psychological_analysis
             
-            # Метод 2: Проверка через usage API
-            try:
-                # Получаем использование за текущий месяц
-                today = datetime.now()
-                start_date = today.replace(day=1).strftime("%Y-%m-%d")
-                end_date = today.strftime("%Y-%m-%d")
-                
-                usage_url = f"https://api.openai.com/dashboard/billing/usage"
-                usage_params = {
-                    "start_date": start_date,
-                    "end_date": end_date
-                }
-                
-                usage_response = requests.get(
-                    usage_url,
-                    headers=headers,
-                    params=usage_params,
-                    timeout=15
-                )
-                
-                if usage_response.status_code == 200:
-                    usage_data = usage_response.json()
-                    total_usage = usage_data.get("total_usage", 0) / 100  # Центы в доллары
-                    
-                    # Для pay-as-you-go аккаунтов
-                    result = {
-                        "available": True,
-                        "message": f"Pay-as-you-go. Использовано: ${total_usage:.2f} в этом месяце",
-                        "balance": None,
-                        "total_usage": total_usage
-                    }
-                    
-                    self.balance_cache = result
-                    self.balance_cache_time = datetime.now()
-                    
-                    return result
+            # Шаг 2: Генерация ниш
+            await update.effective_message.reply_text(
+                "💡 *Шаг 2/3: Подбираю подходящие бизнес-ниши...*",
+                parse_mode='Markdown'
+            )
             
-            except Exception as e:
-                logger.debug(f"Usage API недоступен: {e}")
+            niches_data = await self._generate_niches(session)
+            if niches_data:
+                # Преобразуем в объекты NicheDetails
+                suggested_niches = self._parse_niches_data(niches_data)
+                session.suggested_niches = suggested_niches
             
-            # Метод 3: Простая проверка доступности API
-            try:
-                # Делаем тестовый запрос к models endpoint
-                models_response = requests.get(
-                    "https://api.openai.com/v1/models",
-                    headers=headers,
-                    timeout=10
-                )
-                
-                if models_response.status_code == 200:
-                    result = {
-                        "available": True,
-                        "message": "API доступен (баланс не проверен)",
-                        "balance": None
-                    }
-                    
-                    self.balance_cache = result
-                    self.balance_cache_time = datetime.now()
-                    
-                    return result
+            # Шаг 3: Сохраняем и показываем результаты
+            await update.effective_message.reply_text(
+                "✅ *Шаг 3/3: Формирую результаты...*",
+                parse_mode='Markdown'
+            )
             
-            except Exception as e:
-                logger.debug(f"Models API недоступен: {e}")
+            data_manager.save_session(session)
+            await self._show_niches_to_user(update, session)
             
-            # Если ничего не сработало
-            return {
-                "available": False,
-                "message": "Не удалось проверить баланс",
-                "balance": None
-            }
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Ошибка сети при проверке баланса: {e}")
-            return {
-                "available": False,
-                "message": f"Ошибка сети: {str(e)}",
-                "balance": None
-            }
         except Exception as e:
-            logger.error(f"❌ Неизвестная ошибка при проверке баланса: {e}")
-            return {
-                "available": False,
-                "message": f"Ошибка: {str(e)}",
-                "balance": None
-            }
+            logger.error(f"Ошибка анализа профиля: {e}")
+            await self._send_error_message(update, f"Ошибка анализа: {str(e)}")
     
-    async def _call_openai(
-        self, 
-        prompt: str, 
-        max_tokens: int = None, 
-        temperature: float = None,
-        usage_tracker: OpenAIUsage = None
-    ) -> Optional[str]:
-        """Вызов OpenAI API для версии 0.28.1"""
-        if not self.is_available:
-            logger.warning("OpenAI недоступен")
-            return None
-        
+    async def _generate_psychological_analysis(self, session: UserSession) -> Optional[str]:
+        """Сгенерировать психологический анализ"""
         try:
-            response = openai.ChatCompletion.create(
-                model=self.config.openai_model,
+            # Загружаем промпт
+            prompt_path = Path(__file__).parent.parent / "config" / "prompts" / "psychological_analysis.txt"
+            if not prompt_path.exists():
+                logger.error(f"Файл промпта не найден: {prompt_path}")
+                return None
+            
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                prompt_template = f.read()
+            
+            # Получаем все ответы
+            answers = session.get_all_answers()
+            
+            # Заполняем шаблон
+            prompt = self._fill_psychological_prompt(prompt_template, answers)
+            
+            # Генерируем ответ
+            response = await self.client.chat.completions.create(
+                model=config.openai_model,
                 messages=[
-                    {"role": "system", "content": "Ты - опытный бизнес-консультант и психолог."},
+                    {"role": "system", "content": "Ты - нейропсихолог и бизнес-стратег с 20-летним опытом."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=max_tokens or self.config.openai_max_tokens,
-                temperature=temperature or self.config.openai_temperature,
-                timeout=60
+                temperature=config.openai_temperature,
+                max_tokens=config.openai_max_tokens
             )
             
-            content = response.choices[0].message.content
+            analysis_text = response.choices[0].message.content.strip()
+            logger.info(f"Психологический анализ сгенерирован ({len(analysis_text)} символов)")
             
-            # Логируем использование токенов
-            if usage_tracker:
-                usage = response.usage.to_dict()
-                usage_tracker.add_usage(usage)
-                logger.info(f"✅ OpenAI: использовано {usage.get('total_tokens', 0)} токенов")
+            return analysis_text
             
-            return content
-            
-        except AuthenticationError:
-            logger.error("❌ Ошибка аутентификации OpenAI. Проверьте API ключ.")
-            if usage_tracker:
-                usage_tracker.add_failure()
-            self.is_available = False
-            return None
-        except RateLimitError as e:
-            logger.error(f"❌ Превышен лимит запросов к OpenAI: {e}")
-            if usage_tracker:
-                usage_tracker.add_failure()
-            return None
-        except InvalidRequestError as e:
-            logger.error(f"❌ Неверный запрос к OpenAI: {e}")
-            if usage_tracker:
-                usage_tracker.add_failure()
-            return None
-        except APIError as e:
-            logger.error(f"❌ Ошибка API OpenAI: {e}")
-            if usage_tracker:
-                usage_tracker.add_failure()
-            return None
-        except ServiceUnavailableError:
-            logger.error("❌ Сервис OpenAI временно недоступен")
-            if usage_tracker:
-                usage_tracker.add_failure()
-            return None
         except Exception as e:
-            logger.error(f"❌ Неизвестная ошибка вызова OpenAI: {e}")
-            if usage_tracker:
-                usage_tracker.add_failure()
+            logger.error(f"Ошибка генерации психологического анализа: {e}")
             return None
     
-    async def generate_psychological_analysis(
-        self, 
-        session_data: Dict, 
-        usage_tracker: OpenAIUsage
-    ) -> Optional[str]:
-        """Генерация психологического анализа"""
-        logger.info(f"🧠 Генерация психологического анализа")
-        
-        # Загружаем промт из файла
-        prompt = await self._load_prompt("psychological_analysis")
-        if not prompt:
-            logger.error("❌ Не удалось загрузить промт для анализа")
-            return None
-        
-        # Заполняем промт данными
-        filled_prompt = self._fill_template(prompt, session_data)
-        
-        analysis = await self._call_openai(
-            filled_prompt, 
-            max_tokens=3000, 
-            temperature=0.5,
-            usage_tracker=usage_tracker
-        )
-        
-        if analysis:
-            logger.info(f"✅ Психологический анализ сгенерирован ({len(analysis)} символов)")
-        else:
-            logger.warning("❌ Не удалось сгенерировать анализ")
-            analysis = self._create_fallback_analysis(session_data)
-        
-        return analysis
-    
-    async def generate_business_niches(
-        self, 
-        session_data: Dict, 
-        analysis: str,
-        usage_tracker: OpenAIUsage
-    ) -> List[Dict]:
-        """Генерация бизнес-ниш"""
-        logger.info("🎯 Генерация бизнес-ниш")
-        
-        prompt = await self._load_prompt("generate_niches")
-        if not prompt:
-            logger.error("❌ Не удалось загрузить промт для ниш")
-            return self._create_fallback_niches(session_data)
-        
-        # Подготавливаем данные для промта
-        template_data = {
-            "analysis": analysis[:2000],
-            **session_data
-        }
-        
-        filled_prompt = self._fill_template(prompt, template_data)
-        
-        niches_text = await self._call_openai(
-            filled_prompt, 
-            max_tokens=4000, 
-            temperature=0.8,
-            usage_tracker=usage_tracker
-        )
-        
-        if not niches_text:
-            logger.warning("❌ Не удалось сгенерировать ниши")
-            return self._create_fallback_niches(session_data)
-        
-        # Парсинг сгенерированных ниш
-        niches = self._parse_niches_from_text(niches_text)
-        
-        if niches:
-            logger.info(f"✅ Сгенерировано {len(niches)} ниш")
-        else:
-            logger.warning("❌ Не удалось распарсить ниши")
-            niches = self._create_fallback_niches(session_data)
-        
-        return niches
-    
-    async def generate_detailed_plan(
-        self, 
-        session_data: Dict, 
-        niche: Dict,
-        usage_tracker: OpenAIUsage
-    ) -> Optional[str]:
-        """Генерация детального плана"""
-        logger.info(f"📋 Генерация плана для ниши: {niche.get('name', '')}")
-        
-        prompt = await self._load_prompt("detailed_plan")
-        if not prompt:
-            logger.error("❌ Не удалось загрузить промт для плана")
-            return self._create_fallback_plan(session_data, niche)
-        
-        # Подготавливаем данные
-        template_data = {
-            "niche": niche,
-            **session_data
-        }
-        
-        filled_prompt = self._fill_template(prompt, template_data)
-        
-        plan = await self._call_openai(
-            filled_prompt, 
-            max_tokens=4000, 
-            temperature=0.6,
-            usage_tracker=usage_tracker
-        )
-        
-        if not plan:
-            logger.warning("❌ Не удалось сгенерировать план")
-            plan = self._create_fallback_plan(session_data, niche)
-        
-        return plan
-    
-    async def _load_prompt(self, prompt_name: str) -> Optional[str]:
-        """Загрузить промт из файла"""
+    async def _generate_niches(self, session: UserSession) -> Optional[str]:
+        """Сгенерировать подходящие ниши"""
         try:
-            prompts_dir = self.config.get_prompts_dir()
-            prompt_path = prompts_dir / f"{prompt_name}.txt"
-            
-            if prompt_path.exists():
-                with open(prompt_path, 'r', encoding='utf-8') as f:
-                    return f.read()
-            else:
-                logger.warning(f"⚠️ Файл промта не найден: {prompt_path}")
+            # Загружаем промпт
+            prompt_path = Path(__file__).parent.parent / "config" / "prompts" / "niche_generation.txt"
+            if not prompt_path.exists():
+                logger.error(f"Файл промпта не найден: {prompt_path}")
                 return None
-                
+            
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                prompt_template = f.read()
+            
+            # Получаем все ответы
+            answers = session.get_all_answers()
+            
+            # Заполняем шаблон
+            prompt = self._fill_niches_prompt(prompt_template, answers)
+            
+            # Генерируем ответ
+            response = await self.client.chat.completions.create(
+                model=config.openai_model,
+                messages=[
+                    {"role": "system", "content": "Ты - опытный бизнес-консультант и аналитик рынка."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=config.openai_temperature,
+                max_tokens=2500  # Больше токенов для 5 ниш
+            )
+            
+            niches_text = response.choices[0].message.content.strip()
+            logger.info(f"Ниши сгенерированы ({len(niches_text)} символов)")
+            
+            return niches_text
+            
         except Exception as e:
-            logger.error(f"❌ Ошибка загрузки промта {prompt_name}: {e}")
+            logger.error(f"Ошибка генерации ниш: {e}")
             return None
     
-    def _fill_template(self, template: str, data: Dict) -> str:
-        """Заполнить шаблон данными"""
+    async def generate_detailed_plan(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                    session: UserSession, niche: NicheDetails) -> Optional[str]:
+        """Сгенерировать детальный план для выбранной ниши"""
+        if not self.is_initialized:
+            await self._send_error_message(update, "Сервис временно недоступен")
+            return None
+        
         try:
-            # Простая замена переменных в формате {var_name}
-            for key, value in data.items():
-                if isinstance(value, (str, int, float)):
-                    placeholder = f"{{{key}}}"
-                    template = template.replace(placeholder, str(value))
-                elif isinstance(value, dict):
-                    # Рекурсивно обрабатываем вложенные словари
-                    for sub_key, sub_value in value.items():
-                        placeholder = f"{{{key}.{sub_key}}}"
-                        if isinstance(sub_value, (str, int, float)):
-                            template = template.replace(placeholder, str(sub_value))
+            await update.effective_message.reply_text(
+                "📋 *Создаю детальный пошаговый план...*\n\n"
+                "Это займет около 1-2 минут.",
+                parse_mode='Markdown'
+            )
             
-            return template
+            # Загружаем промпт
+            prompt_path = Path(__file__).parent.parent / "config" / "prompts" / "detailed_plan.txt"
+            if not prompt_path.exists():
+                logger.error(f"Файл промпта не найден: {prompt_path}")
+                return None
+            
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                prompt_template = f.read()
+            
+            # Получаем все ответы
+            answers = session.get_all_answers()
+            
+            # Заполняем шаблон с данными ниши
+            prompt = self._fill_plan_prompt(prompt_template, answers, niche)
+            
+            # Генерируем ответ
+            response = await self.client.chat.completions.create(
+                model=config.openai_model,
+                messages=[
+                    {"role": "system", "content": "Ты - бизнес-стратег и наставник."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=config.openai_temperature,
+                max_tokens=3000  # Больше токенов для детального плана
+            )
+            
+            plan_text = response.choices[0].message.content.strip()
+            logger.info(f"Детальный план сгенерирован ({len(plan_text)} символов)")
+            
+            # Сохраняем план в сессию
+            session.detailed_plan = plan_text
+            session.selected_niche = niche
+            data_manager.save_session(session)
+            
+            return plan_text
+            
         except Exception as e:
-            logger.error(f"❌ Ошибка заполнения шаблона: {e}")
+            logger.error(f"Ошибка генерации плана: {e}")
+            await self._send_error_message(update, f"Ошибка создания плана: {str(e)}")
+            return None
+    
+    def _fill_psychological_prompt(self, template: str, answers: Dict[str, Any]) -> str:
+        """Заполнить шаблон психологического анализа"""
+        try:
+            # Демография
+            demo = answers.get('demographics', {})
+            # Личность
+            personality = answers.get('personality', {})
+            energy = personality.get('energy_profile', {})
+            # Навыки
+            skills = answers.get('skills', {})
+            # Ценности
+            values = answers.get('values', {})
+            ideal_client = values.get('ideal_client', {})
+            # Ограничения
+            limitations = answers.get('limitations', {})
+            
+            prompt = template
+            prompt = prompt.replace("{demographics.age_group}", demo.get('age_group', 'не указано'))
+            prompt = prompt.replace("{demographics.education}", demo.get('education', 'не указано'))
+            prompt = prompt.replace("{demographics.location}", demo.get('location', 'не указано'))
+            
+            prompt = prompt.replace("{', '.join(personality.motivations)}", 
+                                  ', '.join(personality.get('motivations', [])))
+            prompt = prompt.replace("{personality.decision_style}", 
+                                  personality.get('decision_style', 'не указано'))
+            prompt = prompt.replace("{personality.risk_tolerance}", 
+                                  str(personality.get('risk_tolerance', 0)))
+            prompt = prompt.replace("{personality.risk_scenario}", 
+                                  personality.get('risk_scenario', 'не указано'))
+            
+            prompt = prompt.replace("{personality.energy_profile.morning}", 
+                                  str(energy.get('morning', 0)))
+            prompt = prompt.replace("{personality.energy_profile.day}", 
+                                  str(energy.get('day', 0)))
+            prompt = prompt.replace("{personality.energy_profile.evening}", 
+                                  str(energy.get('evening', 0)))
+            prompt = prompt.replace("{personality.energy_profile.peak_analytical}", 
+                                  energy.get('peak_analytical', 'не указано'))
+            prompt = prompt.replace("{personality.energy_profile.peak_creative}", 
+                                  energy.get('peak_creative', 'не указано'))
+            prompt = prompt.replace("{personality.energy_profile.peak_social}", 
+                                  energy.get('peak_social', 'не указано'))
+            
+            prompt = prompt.replace("{', '.join(personality.fears)}", 
+                                  ', '.join(personality.get('fears', [])))
+            prompt = prompt.replace("{personality.fear_custom}", 
+                                  personality.get('fear_custom', 'не указано'))
+            
+            # Навыки
+            prompt = prompt.replace("{skills.analytics}", str(skills.get('analytics', 0)))
+            prompt = prompt.replace("{skills.communication}", str(skills.get('communication', 0)))
+            prompt = prompt.replace("{skills.design}", str(skills.get('design', 0)))
+            prompt = prompt.replace("{skills.organization}", str(skills.get('organization', 0)))
+            prompt = prompt.replace("{skills.manual}", str(skills.get('manual', 0)))
+            prompt = prompt.replace("{skills.emotional_iq}", str(skills.get('emotional_iq', 0)))
+            prompt = prompt.replace("{skills.superpower}", skills.get('superpower', 'не указано'))
+            prompt = prompt.replace("{skills.work_style}", skills.get('work_style', 'не указано'))
+            
+            # Ценности
+            prompt = prompt.replace("{values.existential_answer}", 
+                                  values.get('existential_answer', 'не указано'))
+            prompt = prompt.replace("{values.flow_experience}", 
+                                  values.get('flow_experience', 'не указано'))
+            prompt = prompt.replace("{values.flow_feelings}", 
+                                  values.get('flow_feelings', 'не указано'))
+            prompt = prompt.replace("{values.ideal_client.age}", 
+                                  ideal_client.get('age', 'не указано'))
+            prompt = prompt.replace("{values.ideal_client.field}", 
+                                  ideal_client.get('field', 'не указано'))
+            prompt = prompt.replace("{values.ideal_client.pain}", 
+                                  ideal_client.get('pain', 'не указано'))
+            
+            # Ограничения
+            prompt = prompt.replace("{limitations.budget}", limitations.get('budget', 'не указано'))
+            prompt = prompt.replace("{', '.join(limitations.equipment)}", 
+                                  ', '.join(limitations.get('equipment', [])))
+            prompt = prompt.replace("{', '.join(limitations.knowledge_assets)}", 
+                                  ', '.join(limitations.get('knowledge_assets', [])))
+            prompt = prompt.replace("{limitations.time_per_week}", 
+                                  limitations.get('time_per_week', 'не указано'))
+            prompt = prompt.replace("{limitations.business_scale}", 
+                                  limitations.get('business_scale', 'не указано'))
+            prompt = prompt.replace("{limitations.business_format}", 
+                                  limitations.get('business_format', 'не указано'))
+            
+            return prompt
+            
+        except Exception as e:
+            logger.error(f"Ошибка заполнения промпта: {e}")
             return template
     
-    def _parse_niches_from_text(self, text: str) -> List[Dict]:
-        """Парсинг ниш из текста OpenAI"""
-        niches = []
-        current_niche = {}
-        
-        lines = text.strip().split('\n')
-        
-        for line in lines:
-            line = line.strip()
+    def _fill_niches_prompt(self, template: str, answers: Dict[str, Any]) -> str:
+        """Заполнить шаблон генерации ниш"""
+        try:
+            demo = answers.get('demographics', {})
+            personality = answers.get('personality', {})
+            skills = answers.get('skills', {})
+            limitations = answers.get('limitations', {})
             
-            if line.startswith('НИША'):
-                if current_niche:
-                    niches.append(current_niche.copy())
-                current_niche = {'id': len(niches) + 1}
-                match = re.search(r'НИША\s+\d+:\s*(.+?)$', line)
-                if match:
-                    current_niche['type'] = match.group(1).strip()
+            # Для упрощения берем основные черты
+            motivations = personality.get('motivations', [])
+            decision_style = personality.get('decision_style', '')
             
-            elif line.startswith('НАЗВАНИЕ:'):
-                current_niche['name'] = line.replace('НАЗВАНИЕ:', '').strip()
+            prompt = template
+            prompt = prompt.replace("{age_group}", demo.get('age_group', 'не указано'))
+            prompt = prompt.replace("{education}", demo.get('education', 'не указано'))
+            prompt = prompt.replace("{location}", demo.get('location', 'не указано'))
             
-            elif line.startswith('СУТЬ:'):
-                current_niche['description'] = line.replace('СУТЬ:', '').strip()
+            prompt = prompt.replace("{personality_traits}", decision_style)
+            prompt = prompt.replace("{strengths}", ', '.join(motivations[:3]))
+            prompt = prompt.replace("{weaknesses}", ', '.join(personality.get('fears', [])[:2]))
+            prompt = prompt.replace("{motivations}", ', '.join(motivations))
+            prompt = prompt.replace("{risk_tolerance}", str(personality.get('risk_tolerance', 5)))
             
-            elif line.startswith('ПОЧЕМУ ПОДХОДИТ:'):
-                current_niche['why'] = line.replace('ПОЧЕМУ ПОДХОДИТ:', '').strip()
+            prompt = prompt.replace("{skills.analytics}", str(skills.get('analytics', 3)))
+            prompt = prompt.replace("{skills.communication}", str(skills.get('communication', 3)))
+            prompt = prompt.replace("{skills.design}", str(skills.get('design', 3)))
+            prompt = prompt.replace("{skills.organization}", str(skills.get('organization', 3)))
+            prompt = prompt.replace("{skills.manual}", str(skills.get('manual', 3)))
+            prompt = prompt.replace("{skills.emotional_iq}", str(skills.get('emotional_iq', 3)))
             
-            elif line.startswith('ФОРМАТ:'):
-                current_niche['format'] = line.replace('ФОРМАТ:', '').strip()
+            prompt = prompt.replace("{budget}", limitations.get('budget', 'не указано'))
+            prompt = prompt.replace("{equipment}", ', '.join(limitations.get('equipment', [])))
+            prompt = prompt.replace("{time_per_week}", limitations.get('time_per_week', 'не указано'))
+            prompt = prompt.replace("{business_format}", limitations.get('business_format', 'не указано'))
+            prompt = prompt.replace("{business_scale}", limitations.get('business_scale', 'не указано'))
             
-            elif line.startswith('ИНВЕСТИЦИИ:'):
-                current_niche['investment'] = line.replace('ИНВЕСТИЦИИ:', '').strip()
+            return prompt
             
-            elif line.startswith('СРОК ОКУПАЕМОСТИ:'):
-                current_niche['roi'] = line.replace('СРОК ОКУПАЕМОСТИ:', '').strip()
-            
-            elif line.startswith('ПЕРВЫЕ 3 ШАГА:'):
-                current_niche['steps'] = []
-            elif line.startswith('1.') and 'steps' in current_niche:
-                current_niche['steps'].append(line[2:].strip())
-            elif line.startswith('2.') and 'steps' in current_niche:
-                current_niche['steps'].append(line[2:].strip())
-            elif line.startswith('3.') and 'steps' in current_niche:
-                current_niche['steps'].append(line[2:].strip())
-        
-        if current_niche:
-            niches.append(current_niche)
-        
-        # Добавляем дефолтные шаги если их нет
-        for niche in niches:
-            if 'steps' not in niche or len(niche['steps']) < 3:
-                niche['steps'] = [
-                    'Провести анализ рынка и конкурентов',
-                    'Создать MVP продукта или услуги',
-                    'Найти первых 3 клиентов для тестирования'
-                ]
-        
-        return niches
+        except Exception as e:
+            logger.error(f"Ошибка заполнения промпта ниш: {e}")
+            return template
     
-    def _create_fallback_analysis(self, session_data: Dict) -> str:
-        """Запасной психологический анализ"""
-        return f"""# ПСИХОЛОГИЧЕСКИЙ АНАЛИЗ (базовый режим)
-
-## 1. КЛЮЧЕВЫЕ ХАРАКТЕРИСТИКИ:
-- **Возрастная группа:** {session_data.get('demographics', {}).get('age_group', 'Не указано')}
-- **Образование:** {session_data.get('demographics', {}).get('education', 'Не указано')}
-- **Локация:** {session_data.get('demographics', {}).get('location', 'Не указано')}
-
-## 2. СКРЫТЫЙ ПОТЕНЦИАЛ:
-- Возможность монетизации образования и опыта
-- Географические преимущества вашего региона
-- Сочетание практических навыков и личных интересов
-
-## 3. РЕКОМЕНДАЦИИ:
-1. Начинать с небольших проектов для быстрого получения результата
-2. Использовать сильные стороны для создания конкурентного преимущества
-3. Постепенно расширять масштаб по мере роста уверенности"""
-
-    def _create_fallback_niches(self, session_data: Dict) -> List[Dict]:
-        """Запасные бизнес-ниши"""
-        location = session_data.get('demographics', {}).get('location', 'вашем городе')
-        
-        return [
-            {
-                'id': 1,
-                'type': '🔥 Быстрый старт',
-                'name': 'Консультационные услуги',
-                'description': f'Предоставление профессиональных консультаций в вашей сфере знаний бизнесам в {location}',
-                'why': 'Использует ваши профессиональные навыки и образование',
-                'format': 'Гибрид',
-                'investment': '10,000-50,000₽',
-                'roi': '1-2 месяца',
-                'steps': [
-                    'Определить 3 ключевые темы для консультаций',
-                    'Создать профессиональное портфолио',
-                    'Найти первых клиентов через LinkedIn'
-                ]
-            },
-            {
-                'id': 2,
-                'type': '🚀 Сбалансированный',
-                'name': 'Онлайн-обучение',
-                'description': 'Создание и продажа онлайн-курсов по вашей экспертизе',
-                'why': 'Сочетает образование и желание делиться знаниями',
-                'format': 'Онлайн',
-                'investment': '50,000-100,000₽',
-                'roi': '3-4 месяца',
-                'steps': [
-                    'Разработать программу мини-курса',
-                    'Создать пробные уроки',
-                    'Запустить предзаказ через соцсети'
-                ]
+    def _fill_plan_prompt(self, template: str, answers: Dict[str, Any], niche: NicheDetails) -> str:
+        """Заполнить шаблон детального плана"""
+        try:
+            demo = answers.get('demographics', {})
+            personality = answers.get('personality', {})
+            skills = answers.get('skills', {})
+            values = answers.get('values', {})
+            limitations = answers.get('limitations', {})
+            
+            energy = personality.get('energy_profile', {})
+            
+            prompt = template
+            prompt = prompt.replace("{age_group}", demo.get('age_group', 'не указано'))
+            prompt = prompt.replace("{education}", demo.get('education', 'не указано'))
+            prompt = prompt.replace("{location}", demo.get('location', 'не указано'))
+            prompt = prompt.replace("{budget}", limitations.get('budget', 'не указано'))
+            prompt = prompt.replace("{time_per_week}", limitations.get('time_per_week', 'не указано'))
+            
+            prompt = prompt.replace("{fears}", ', '.join(personality.get('fears', [])))
+            prompt = prompt.replace("{decision_style}", personality.get('decision_style', 'не указано'))
+            prompt = prompt.replace("{peak_morning}", str(energy.get('morning', 4)))
+            prompt = prompt.replace("{peak_day}", str(energy.get('day', 4)))
+            prompt = prompt.replace("{peak_evening}", str(energy.get('evening', 4)))
+            prompt = prompt.replace("{superpower}", skills.get('superpower', 'не указано'))
+            prompt = prompt.replace("{work_style}", skills.get('work_style', 'не указано'))
+            prompt = prompt.replace("{learning_style}", skills.get('learning_style', 'не указано'))
+            
+            prompt = prompt.replace("{niche_name}", niche.name)
+            prompt = prompt.replace("{niche_category}", niche.category.value)
+            prompt = prompt.replace("{niche_suitability}", niche.description[:200] + "...")
+            prompt = prompt.replace("{niche_format}", "Онлайн/Офлайн/Гибрид")  # Упрощенно
+            
+            return prompt
+            
+        except Exception as e:
+            logger.error(f"Ошибка заполнения промпта плана: {e}")
+            return template
+    
+    def _parse_niches_data(self, niches_text: str) -> List[NicheDetails]:
+        """Парсить сгенерированные ниши в объекты NicheDetails"""
+        try:
+            # Упрощенный парсинг - в реальном проекте нужна более сложная логика
+            niches = []
+            sections = niches_text.split('\n\n### ')
+            
+            category_map = {
+                'БЫСТРЫЙ СТАРТ': NicheCategory.QUICK_START,
+                'СБАЛАНСИРОВАННЫЙ': NicheCategory.BALANCED,
+                'ДОЛГОСРОЧНЫЙ': NicheCategory.LONG_TERM,
+                'РИСКОВАННЫЙ': NicheCategory.RISKY,
+                'СКРЫТАЯ НИША': NicheCategory.HIDDEN
             }
-        ]
+            
+            for section in sections[1:]:  # Пропускаем первый раздел
+                lines = section.strip().split('\n')
+                if not lines:
+                    continue
+                
+                # Первая строка - название и эмодзи
+                first_line = lines[0]
+                if ' ' in first_line:
+                    emoji, name = first_line.split(' ', 1)
+                else:
+                    emoji, name = '📊', first_line
+                
+                # Ищем категорию
+                category = NicheCategory.QUICK_START
+                for cat_name, cat_enum in category_map.items():
+                    if any(cat_name.lower() in line.lower() for line in lines):
+                        category = cat_enum
+                        break
+                
+                # Создаем объект ниши
+                niche = NicheDetails(
+                    id=f"generated_{len(niches)+1}",
+                    name=name.strip(),
+                    category=category,
+                    description="\n".join(lines[1:5]) if len(lines) > 1 else "Описание не сгенерировано",
+                    emoji=emoji.strip(),
+                    risk_level=3,
+                    time_to_profit="1-3 месяца",
+                    required_skills=["Адаптивность", "Мотивация"],
+                    min_budget=50000,
+                    success_rate=0.6,
+                    examples=["Пример 1", "Пример 2"]
+                )
+                
+                niches.append(niche)
+            
+            # Если не удалось распарсить, создаем стандартные ниши
+            if not niches:
+                niches = config.niche_categories[:3]
+            
+            return niches[:5]  # Не более 5 ниш
+            
+        except Exception as e:
+            logger.error(f"Ошибка парсинга ниш: {e}")
+            # Возвращаем стандартные ниши
+            return config.niche_categories[:3]
     
-    def _create_fallback_plan(self, session_data: Dict, niche: Dict) -> str:
-        """Запасной детальный план"""
-        return f"""# 📋 ДЕТАЛЬНЫЙ БИЗНЕС-ПЛАН (базовый режим)
+    async def _show_niches_to_user(self, update: Update, session: UserSession):
+        """Показать предложенные ниши пользователю"""
+        try:
+            if not session.suggested_niches:
+                await update.effective_message.reply_text(
+                    "❌ Не удалось подобрать подходящие ниши.\n"
+                    "Попробуйте пройти анкету заново.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            message = "🎯 *НАЙДЕННЫЕ ПОДХОДЯЩИЕ НИШИ:*\n\n"
+            
+            for i, niche in enumerate(session.suggested_niches, 1):
+                message += f"{i}. {niche.emoji} *{niche.name}*\n"
+                message += f"   📊 {niche.category.value}\n"
+                
+                if niche.description:
+                    desc = niche.description[:100] + "..." if len(niche.description) > 100 else niche.description
+                    message += f"   📝 {desc}\n"
+                
+                message += f"   🎯 Риск: {'★' * niche.risk_level}{'☆' * (5 - niche.risk_level)}\n"
+                message += f"   ⏱️ Окупаемость: {niche.time_to_profit}\n\n"
+            
+            message += (
+                "Для получения детального плана по любой нише,\n"
+                "нажмите на соответствующую кнопку ниже."
+            )
+            
+            # Создаем кнопки для выбора ниши
+            from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+            keyboard = []
+            
+            for i, niche in enumerate(session.suggested_niches, 1):
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{i}. {niche.emoji} {niche.name}",
+                        callback_data=f"select_niche_{niche.id}"
+                    )
+                ])
+            
+            keyboard.append([
+                InlineKeyboardButton("🔄 Пройти анкету заново", callback_data="restart_questionnaire")
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.effective_message.reply_text(
+                message,
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка показа ниш: {e}")
+            await update.effective_message.reply_text(
+                "❌ Ошибка при отображении результатов.\n"
+                "Попробуйте позже.",
+                parse_mode='Markdown'
+            )
+    
+    async def _send_error_message(self, update: Update, message: str):
+        """Отправить сообщение об ошибке"""
+        try:
+            await update.effective_message.reply_text(
+                f"❌ {message}",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"Ошибка отправки сообщения: {e}")
 
-## 🎯 НИША: {niche.get('name', 'Бизнес-услуги')}
+# Глобальный экземпляр сервиса
+openai_service = OpenAIService()
 
-### 1. ПЕРВЫЕ ШАГИ (неделя 1):
-- Изучить конкурентов в вашей нише
-- Определить уникальное предложение
-- Создать базовые материалы для продвижения
+# Функции для импорта
+async def analyze_user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession):
+    """Анализировать профиль пользователя"""
+    await openai_service.analyze_user_profile(update, context, session)
 
-### 2. ЗАПУСК (месяц 1-3):
-- Найти первых 3-5 клиентов
-- Протестировать предложение
-- Собрать обратную связь и улучшить
-
-### 3. МАСШТАБИРОВАНИЕ (месяц 4-6):
-- Оптимизировать процессы
-- Расширить предложение
-- Увеличить клиентскую базу
-
-💡 **Совет:** Начинайте с малого, быстро тестируйте гипотезы, собирайте обратную связь."""
+async def generate_detailed_plan(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                session: UserSession, niche: NicheDetails):
+    """Сгенерировать детальный план"""
+    return await openai_service.generate_detailed_plan(update, context, session, niche)
