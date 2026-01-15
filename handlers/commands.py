@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes, CallbackContext
 
 from models.enums import BotState
 from models.session import UserSession
-from services.data_manager import DataManager  # Импортируем КЛАСС
+from services.data_manager import data_manager  # ИСПРАВЛЕНО: импорт глобального data_manager
 from utils.formatters import (
     format_session_summary, 
     format_recommendations,
@@ -26,8 +26,7 @@ from utils.formatters import (
 
 logger = logging.getLogger(__name__)
 
-# СОЗДАЕМ ЭКЗЕМПЛЯР DataManager вместо импорта глобальной переменной
-data_manager = DataManager()
+# УДАЛЕНО: data_manager = DataManager() - используем глобальный из services.data_manager
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -35,25 +34,26 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         user_id = user.id
         user_name = user.first_name or "Пользователь"
-        
+
         logger.info(f"🚀 Команда /start от пользователя {user_id} ({user_name})")
-        
+
         # Создаем или получаем сессию пользователя
         session = data_manager.get_session(user_id)
         if not session:
             session = UserSession(
                 user_id=user_id,
-                user_name=user_name,
+                username=user_name,
+                full_name=user.full_name or "",
                 created_at=datetime.now()
             )
             data_manager.save_session(session)
             logger.info(f"📝 Создана новая сессия для пользователя {user_id}")
         else:
-            session.user_name = user_name
-            session.last_activity = datetime.now()
+            session.username = user_name
+            session.last_interaction = datetime.now()
             data_manager.save_session(session)
             logger.info(f"📝 Обновлена сессия для пользователя {user_id}")
-        
+
         # Приветственное сообщение
         welcome_text = (
             f"👋 Привет, {user_name}!\n\n"
@@ -66,14 +66,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Создам детальный план действий\n"
             f"• Помогу избежать типичных ошибок\n\n"
             f"📊 *Как это работает:*\n"
-            f"1. Пройди анкету из 18 вопросов\n"
+            f"1. Пройди анкету из 35 вопросов\n"
             f"2. Получи психологический анализ\n"
             f"3. Выбери подходящие ниши\n"
             f"4. Получи детальный план действий\n\n"
             f"🚀 *Начнем?*\n"
             f"Просто напиши /questionnaire или нажми кнопку ниже👇"
         )
-        
+
         # Создаем клавиатуру
         keyboard = [
             [
@@ -82,17 +82,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await update.message.reply_text(
             text=welcome_text,
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
-        
+
         # Обновляем состояние сессии
         session.current_state = BotState.START
         data_manager.save_session(session)
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка в start_command: {e}", exc_info=True)
         await update.message.reply_text(
@@ -111,7 +111,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /balance - Проверить баланс OpenAI\n"
         "• /restart - Начать заново\n\n"
         "📊 *Процесс работы:*\n"
-        "1. Пройдите анкету (18 вопросов)\n"
+        "1. Пройдите анкету (35 вопросов)\n"
         "2. Получите психологический анализ\n"
         "3. Выберите подходящие ниши\n"
         "4. Получите детальный план\n\n"
@@ -123,7 +123,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📞 *Поддержка:*\n"
         "По вопросам работы бота обращайтесь к разработчику."
     )
-    
+
     await update.message.reply_text(
         text=help_text,
         parse_mode="Markdown"
@@ -132,32 +132,40 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /stats"""
     try:
-        stats = data_manager.stats  # Используем stats из data_manager
-        
+        stats = data_manager.statistics
+
         stats_text = (
             f"📊 *Статистика Бизнес-Навигатора v7.0*\n\n"
-            f"👤 Пользователей всего: {stats.total_users}\n"
-            f"📝 Активных сессий: {stats.active_sessions}\n"
-            f"✅ Завершённых анкет: {stats.completed_profiles}\n"
-            f"💎 Сгенерированных ниш: {stats.generated_niches}\n"
-            f"📋 Сгенерированных планов: {stats.generated_plans}\n"
-            f"💬 Всего сообщений: {stats.total_messages}\n\n"
+            f"👥 Пользователей: {stats.total_users}\n"
+            f"📋 Сессий: {stats.total_sessions}\n"
+            f"✅ Завершено: {stats.completed_sessions}\n"
+            f"💬 Сообщений: {stats.total_messages}\n"
+            f"⚡ Активных: {stats.active_sessions}\n"
+            f"⏱️ Uptime: {stats.get_uptime()}\n\n"
         )
-        
+
+        # Добавляем статистику OpenAI если есть
+        if hasattr(stats, 'openai_requests') and stats.openai_requests > 0:
+            stats_text += (
+                f"*Использование OpenAI:*\n"
+                f"🤖 Запросов: {stats.openai_requests}\n"
+                f"🔤 Токенов: {stats.openai_tokens:,}\n"
+                f"💵 Стоимость: ${stats.openai_cost:.4f}\n\n"
+            )
+
         # Добавляем время последней активности
-        if hasattr(data_manager, 'user_sessions') and data_manager.user_sessions:
-            recent_sessions = list(data_manager.user_sessions.values())[:3]
+        if hasattr(data_manager, 'sessions') and data_manager.sessions:
+            recent_sessions = list(data_manager.sessions.values())[:3]
             stats_text += f"🔄 *Недавняя активность:*\n"
             for session in recent_sessions:
-                if session.last_activity:
-                    time_diff = (datetime.now() - session.last_activity).seconds // 60
-                    stats_text += f"• {session.user_name}: {time_diff} мин назад\n"
-        
+                time_diff = (datetime.now() - session.last_interaction).seconds // 60
+                stats_text += f"• {session.full_name or 'Пользователь'}: {time_diff} мин назад\n"
+
         await update.message.reply_text(
             text=stats_text,
             parse_mode="Markdown"
         )
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка в stats_command: {e}")
         await update.message.reply_text(
@@ -167,46 +175,47 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /balance"""
     try:
-        from services.openai_service import OpenAIService
+        from services.openai_service import openai_service
         from config.settings import config
-        
+
         if not config.openai_api_key:
             await update.message.reply_text(
                 "🤖 OpenAI отключен. Работаем в базовом режиме."
             )
             return
-        
-        # Создаем экземпляр сервиса
-        openai_service = OpenAIService(config)
-        
-        # Получаем информацию о балансе
-        available, info = await openai_service.check_availability()
-        
-        if available:
-            balance_text = (
-                f"💰 *Баланс OpenAI*\n\n"
-                f"✅ Сервис доступен\n"
-                f"📊 {info}\n\n"
-                f"📈 Использование:\n"
-                f"• Запросов: {data_manager.openai_usage.requests}\n"
-                f"• Токенов: {data_manager.openai_usage.tokens}\n"
-                f"• Стоимость: ${data_manager.openai_usage.cost:.4f}"
+
+        # Используем глобальный экземпляр сервиса
+        if not openai_service.is_initialized:
+            await update.message.reply_text(
+                "🤖 OpenAI сервис не инициализирован"
+            )
+            return
+
+        # Получаем информацию о балансе (упрощенная версия)
+        balance_text = (
+            f"💰 *Статус OpenAI*\n\n"
+            f"✅ Сервис доступен\n"
+            f"🤖 Модель: {config.openai_model}\n"
+            f"🌡️ Температура: {config.openai_temperature}\n\n"
+        )
+
+        # Добавляем статистику использования
+        stats = data_manager.statistics
+        if hasattr(stats, 'openai_requests') and stats.openai_requests > 0:
+            balance_text += (
+                f"📊 *Использование:*\n"
+                f"• Запросов: {stats.openai_requests}\n"
+                f"• Токенов: {stats.openai_tokens:,}\n"
+                f"• Стоимость: ${stats.openai_cost:.4f}"
             )
         else:
-            balance_text = (
-                f"💰 *Баланс OpenAI*\n\n"
-                f"⚠️ Проблемы с доступом:\n"
-                f"{info}\n\n"
-                f"📊 Использование (последнее):\n"
-                f"• Запросов: {data_manager.openai_usage.requests}\n"
-                f"• Токенов: {data_manager.openai_usage.tokens}"
-            )
-        
+            balance_text += "📊 *Использование:* пока нет запросов"
+
         await update.message.reply_text(
             text=balance_text,
             parse_mode="Markdown"
         )
-        
+
     except ImportError:
         await update.message.reply_text(
             "🤖 Модуль OpenAI не настроен"
@@ -221,7 +230,7 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /restart"""
     try:
         user_id = update.effective_user.id
-        
+
         # Получаем сессию
         session = data_manager.get_session(user_id)
         if not session:
@@ -229,25 +238,25 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "У вас нет активной сессии. Используйте /start для начала работы."
             )
             return
-        
+
         # Подтверждение перезапуска
         confirm_text = (
             f"🔄 *Перезапуск анкеты*\n\n"
             f"Вы уверены, что хотите начать анкету заново?\n\n"
             f"📋 *Текущий прогресс:*\n"
-            f"• Вопросов пройдено: {session.current_question_index if hasattr(session, 'current_question_index') else 0}/18\n"
-            f"• Ответов сохранено: {len(session.answers) if hasattr(session, 'answers') else 0}\n\n"
+            f"• Вопросов пройдено: {session.current_question_index}/35\n"
+            f"• Ответов сохранено: {len(session.get_all_answers())}\n\n"
             f"⚠️ *Внимание:* Все ваши текущие ответы будут удалены!"
         )
-        
+
         reply_markup = create_restart_keyboard()
-        
+
         await update.message.reply_text(
             text=confirm_text,
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка в restart_command: {e}")
         await update.message.reply_text(
@@ -259,29 +268,30 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or "Пользователь"
-        
+
         logger.info(f"📝 Команда /questionnaire от пользователя {user_id}")
-        
+
         # Получаем или создаем сессию
         session = data_manager.get_session(user_id)
         if not session:
             session = UserSession(
                 user_id=user_id,
-                user_name=user_name,
+                username=update.effective_user.username or "",
+                full_name=user_name,
                 created_at=datetime.now()
             )
             data_manager.save_session(session)
-        
+
         # Проверяем, есть ли незавершенная анкета
-        if hasattr(session, 'current_question_index') and session.current_question_index > 0 and session.current_question_index < 18:
+        if session.current_question_index > 0 and session.current_question_index < 35:
             continue_text = (
                 f"📊 *Продолжить анкету?*\n\n"
                 f"У вас есть незавершенная анкета:\n"
-                f"• Пройдено вопросов: {session.current_question_index}/18\n"
-                f"• Состояние: {session.current_state.value if hasattr(session, 'current_state') else 'неизвестно'}\n\n"
+                f"• Пройдено вопросов: {session.current_question_index}/35\n"
+                f"• Состояние: {session.current_state.name}\n\n"
                 f"Хотите продолжить с того же места?"
             )
-            
+
             keyboard = [
                 [
                     InlineKeyboardButton("✅ Продолжить", callback_data="continue_questionnaire"),
@@ -289,41 +299,40 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
             await update.message.reply_text(
                 text=continue_text,
                 parse_mode="Markdown",
                 reply_markup=reply_markup
             )
             return
-        
+
         # Начинаем новую анкету
         from config.settings import config
-        
+
         if not config.questions:
             await update.message.reply_text(
                 "❌ Вопросы не загружены. Обратитесь к администратору."
             )
             return
-        
-        # Сбрасываем сессию для новой анкеты (если есть метод reset)
-        if hasattr(session, 'reset_for_new_questionnaire'):
-            session.reset_for_new_questionnaire()
-        else:
-            # Простой сброс
-            session.current_state = BotState.START
-            if hasattr(session, 'current_question_index'):
-                session.current_question_index = 0
-            if hasattr(session, 'answers'):
-                session.answers = {}
-        
-        session.last_activity = datetime.now()
+
+        # Сбрасываем сессию для новой анкеты
+        session.current_state = BotState.START
+        session.current_question_index = 0
+        session.is_completed = False
+        session.completion_date = None
+        session.analysis_result = ""
+        session.suggested_niches = []
+        session.selected_niche = None
+        session.detailed_plan = ""
+
+        session.last_interaction = datetime.now()
         data_manager.save_session(session)
-        
+
         start_text = (
             f"🎯 *Начинаем анкету!*\n\n"
-            f"Всего вопросов: 18\n"
-            f"Примерное время: 5-7 минут\n\n"
+            f"Всего вопросов: 35\n"
+            f"Примерное время: 10-15 минут\n\n"
             f"📋 *Типы вопросов:*\n"
             f"• 📝 Текстовые ответы\n"
             f"• 🔘 Выбор из вариантов\n"
@@ -333,22 +342,43 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             f"Отвечайте честно — это важно для точного анализа!\n\n"
             f"🚀 *Первый вопрос:*"
         )
-        
+
         await update.message.reply_text(
             text=start_text,
             parse_mode="Markdown"
         )
-        
-        # Ищем бот в контексте
-        if context and hasattr(context, 'bot_data') and 'bot_instance' in context.bot_data:
-            bot_instance = context.bot_data['bot_instance']
-            first_question = config.questions[0]
-            await bot_instance.send_question(user_id, first_question)
-        else:
-            await update.message.reply_text(
-                "📝 *Первый вопрос:*\n" + config.questions[0]['text']
+
+        # Запускаем первый вопрос через QuestionEngine
+        from core.question_engine import question_engine
+        question = question_engine.get_question_by_index(0)
+        if question:
+            from utils.formatters import format_question_text
+            question_text = format_question_text(
+                question['text'], 
+                user_name, 
+                1, 
+                35
             )
-        
+            
+            keyboard = question_engine.create_keyboard_for_question(question)
+            
+            if keyboard:
+                await update.message.reply_text(
+                    question_text,
+                    parse_mode='Markdown',
+                    reply_markup=keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    question_text,
+                    parse_mode='Markdown'
+                )
+            
+            # Обновляем состояние сессии
+            session.current_state = BotState.DEMOGRAPHY
+            session.current_question_index = 0
+            data_manager.save_session(session)
+
     except Exception as e:
         logger.error(f"❌ Ошибка в questionnaire_command: {e}", exc_info=True)
         await update.message.reply_text(
@@ -359,38 +389,39 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /status (статус сессии)"""
     try:
         user_id = update.effective_user.id
-        
+
         session = data_manager.get_session(user_id)
         if not session:
             await update.message.reply_text(
                 "📭 У вас нет активной сессии. Используйте /start для начала работы."
             )
             return
-        
+
         status_text = format_session_summary(session)
-        
-        if hasattr(session, 'answers') and session.answers:
-            status_text += "\n\n" + format_answer_summary(session.answers)
-        
+
+        if session.get_all_answers():
+            status_text += "\n\n" + format_answer_summary(session.get_all_answers())
+
         # Добавляем кнопки действий
         keyboard = []
-        
-        if hasattr(session, 'current_state') and session.current_state == BotState.IN_QUESTIONNAIRE and hasattr(session, 'current_question_index') and session.current_question_index < 18:
+
+        if session.current_state in [BotState.DEMOGRAPHY, BotState.PERSONALITY, 
+                                   BotState.SKILLS, BotState.VALUES, BotState.LIMITATIONS]:
             keyboard.append([InlineKeyboardButton("▶️ Продолжить анкету", callback_data="continue_questionnaire")])
-        
-        if hasattr(session, 'answers') and session.answers:
+
+        if session.get_all_answers():
             keyboard.append([InlineKeyboardButton("📊 Показать ответы", callback_data="show_answers")])
-        
+
         keyboard.append([InlineKeyboardButton("🔄 Начать заново", callback_data="restart_confirm")])
-        
+
         reply_markup = InlineKeyboardMarkup(keyboard)
-        
+
         await update.message.reply_text(
             text=status_text,
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка в status_command: {e}")
         await update.message.reply_text(
@@ -401,26 +432,26 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда для отладки (только для разработчиков)"""
     try:
         user_id = update.effective_user.id
-        
+
         debug_info = (
             f"🐛 *Отладочная информация*\n\n"
             f"👤 User ID: {user_id}\n"
-            f"📊 Всего сессий: {data_manager.get_session_count()}\n"
+            f"📊 Всего сессий: {len(data_manager.sessions)}\n"
             f"🕒 Время сервера: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             f"📁 Конфигурация:\n"
         )
-        
+
         from config.settings import config
         debug_info += f"• Вопросов: {len(config.questions)}\n"
         debug_info += f"• Ниш: {len(config.niche_categories)}\n"
         debug_info += f"• Токен бота: {'Установлен' if config.telegram_token else 'Отсутствует'}\n"
         debug_info += f"• Токен OpenAI: {'Установлен' if config.openai_api_key else 'Отсутствует'}\n"
-        
+
         await update.message.reply_text(
             text=debug_info,
             parse_mode="Markdown"
         )
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка в debug_command: {e}")
         await update.message.reply_text(
