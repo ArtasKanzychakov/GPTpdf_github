@@ -26,21 +26,73 @@ except ImportError as e:
 
 logger = logging.getLogger(__name__)
 
-# Теперь импортируем остальное
+# Теперь импортируем остальное с обработкой ошибок
 try:
     from config.settings import BotConfig
     from core.bot import BusinessNavigatorBot
-    from services.health_check import start_health_check_server
-    from services.openai_service import OpenAIService
 except ImportError as e:
-    logger.error(f"❌ Ошибка импорта модулей: {e}")
-    logger.error("Проверьте структуру проекта и зависимости")
-    logger.error("Убедитесь, что все файлы на месте:")
+    logger.error(f"❌ Ошибка импорта основных модулей: {e}")
+    logger.error("Проверьте наличие файлов:")
     logger.error("  - config/settings.py")
     logger.error("  - core/bot.py")
-    logger.error("  - services/health_check.py")
-    logger.error("  - services/openai_service.py")
     sys.exit(1)
+
+# Импорты с обработкой ошибок
+try:
+    from services.health_check import start_health_check_server
+    health_check_available = True
+except ImportError:
+    logger.warning("⚠️ Модуль health_check не найден, health сервер будет отключен")
+    health_check_available = False
+    start_health_check_server = None
+
+try:
+    from services.openai_service import OpenAIService
+    openai_available = True
+except ImportError:
+    logger.warning("⚠️ Модуль openai_service не найден, OpenAI функции будут отключены")
+    openai_available = False
+    OpenAIService = None
+
+try:
+    from services.data_manager import data_manager
+    data_manager_available = True
+except ImportError:
+    logger.warning("⚠️ Модуль data_manager не найден, создаю временный менеджер данных")
+    data_manager_available = False
+    
+    # Создаем временный менеджер данных
+    from models.session import UserSession
+    
+    class TempDataManager:
+        def __init__(self):
+            self.sessions = {}
+            logger.info("📝 Создан временный менеджер данных (данные не сохраняются)")
+        
+        def initialize(self):
+            logger.info("🔄 Инициализация временного менеджера данных")
+        
+        def get_session(self, user_id):
+            return self.sessions.get(user_id)
+        
+        def create_session(self, user_id, username="", full_name=""):
+            session = UserSession(user_id=user_id, username=username, full_name=full_name)
+            self.sessions[user_id] = session
+            logger.info(f"📝 Создана временная сессия для пользователя {user_id}")
+            return session
+        
+        def save_session(self, session):
+            self.sessions[session.user_id] = session
+            logger.debug(f"💾 Сессия пользователя {session.user_id} сохранена во временное хранилище")
+        
+        def cleanup_old_sessions(self, days=7):
+            return 0
+        
+        def get_statistics(self):
+            from models.session import BotStatistics
+            return BotStatistics()
+    
+    data_manager = TempDataManager()
 
 # Глобальная переменная для graceful shutdown
 bot_instance = None
@@ -62,9 +114,6 @@ async def main():
         # Проверка Python версии
         python_version = sys.version_info
         logger.info(f"🐍 Python версия: {python_version.major}.{python_version.minor}.{python_version.micro}")
-        
-        if not (python_version.major == 3 and python_version.minor >= 9):
-            logger.warning(f"⚠️ Рекомендуется Python 3.9+. Текущая: {sys.version}")
         
         # Загрузка конфигурации
         logger.info("⚙️ Загружаю конфигурацию...")
@@ -92,37 +141,46 @@ async def main():
         logger.info(f"📝 Вопросов загружено: {len(config.questions)}")
         logger.info(f"🏢 Ниш загружено: {len(config.niche_categories)}")
         
-        # Проверка OpenAI (если ключ есть)
-        if config.openai_api_key:
+        # Инициализация менеджера данных
+        logger.info("💾 Инициализация менеджера данных...")
+        data_manager.initialize()
+        
+        # Проверка OpenAI (если ключ есть и модуль доступен)
+        if config.openai_api_key and openai_available:
             logger.info("🔍 Проверяем подключение к OpenAI...")
             try:
+                openai_service = OpenAIService()
                 if openai_service.is_initialized:
                     logger.info("✅ OpenAI клиент инициализирован")
                 else:
                     logger.warning("⚠️ OpenAI клиент не инициализирован")
                     logger.warning("Будет работать в базовом режиме")
-                    
             except Exception as e:
                 logger.warning(f"⚠️ Ошибка при проверке OpenAI: {e}")
                 logger.warning("Будет работать в базовом режиме")
-        else:
+        elif not config.openai_api_key:
             logger.warning("⚠️ OPENAI_API_KEY не найден. Будет работать базовый режим без AI.")
-            logger.warning("Для полной функциональности добавьте OPENAI_API_KEY в переменные окружения")
+        else:
+            logger.warning("⚠️ Модуль OpenAI недоступен. Будет работать базовый режим.")
         
         # Создание бота
         logger.info("🤖 Создаю экземпляр бота...")
         bot = BusinessNavigatorBot(config)
         bot_instance = bot
         
-        # Запуск health check сервера (для Render) в фоне
-        port = int(os.getenv('PORT', config.port))
-        logger.info(f"🌐 Запускаю health check сервер на порту {port}...")
+        # Запуск health check сервера (если доступен)
+        if health_check_available and start_health_check_server:
+            port = int(os.getenv('PORT', config.port))
+            logger.info(f"🌐 Запускаю health check сервер на порту {port}...")
+            
+            health_task = asyncio.create_task(
+                start_health_check_server(host=config.host, port=port)
+            )
+            logger.info("✅ Health check сервер запущен")
+        else:
+            logger.info("⚠️ Health check сервер отключен")
+            health_task = None
         
-        health_task = asyncio.create_task(
-            start_health_check_server(host=config.host, port=port)
-        )
-        
-        logger.info("✅ Health check сервер запущен")
         logger.info("-" * 40)
         
         # Настраиваем обработку сигналов
@@ -133,22 +191,28 @@ async def main():
         logger.info("▶️ Запускаю бота в режиме polling...")
         logger.info("ℹ️ Для остановки нажмите Ctrl+C")
         
-        # Запускаем бота и health сервер параллельно
+        # Создаем список задач
+        tasks = []
         bot_task = asyncio.create_task(bot.run())
+        tasks.append(bot_task)
+        
+        if health_task:
+            tasks.append(health_task)
         
         # Ожидаем завершения любой из задач
-        done, pending = await asyncio.wait(
-            [bot_task, health_task],
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        
-        # Отменяем оставшиеся задачи
-        for task in pending:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        if tasks:
+            done, pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            # Отменяем оставшиеся задачи
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         
         logger.info("⏹ Бот остановлен")
         
@@ -173,7 +237,6 @@ def run_bot():
     
     # Настраиваем event loop для асинхронной работы
     if sys.platform == 'win32':
-        # Windows требует особого подхода
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
     try:
