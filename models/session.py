@@ -309,3 +309,30 @@ class AnalysisResult:
     recommended_niches: List[Dict[str, Any]] = field(default_factory=list)
     ideal_working_conditions: Dict[str, Any] = field(default_factory=dict)
     generated_at: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class OpenAIUsage:
+    """Статистика использования OpenAI"""
+    total_requests: int = 0
+    total_tokens: int = 0
+    total_cost: float = 0.0
+    last_request_time: Optional[datetime] = None
+    
+    def add_request(self, tokens: int, cost: float = 0.0):
+        """Добавить информацию о запросе"""
+        self.total_requests += 1
+        self.total_tokens += tokens
+        self.total_cost += cost
+        self.last_request_time = datetime.now()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Конвертировать в словарь"""
+        return {
+            'total_requests': self.total_requests,
+            'total_tokens': self.total_tokens,
+            'total_cost': self.total_cost,
+            'last_request_time': self.last_request_time.isoformat() if self.last_request_time else None
+        }
+    
+    def __str__(self) -> str:
+        return f"Requests: {self.total_requests}, Tokens: {self.total_tokens}, Cost: ${self.total_cost:.4f}"
