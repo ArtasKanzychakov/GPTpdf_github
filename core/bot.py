@@ -1,354 +1,447 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Основной класс бота Бизнес-Навигатора
+Основной класс бота Бизнес-Навигатор
 """
 
 import logging
+import asyncio
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-# ИМПОРТЫ: убираем циклический импорт config.settings
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters
+    Application, CommandHandler, MessageHandler, filters,
+    CallbackQueryHandler, ContextTypes, ConversationHandler
 )
 
-from core.question_engine import QuestionEngine
-from services.data_manager import DataManager
-from services.openai_service import OpenAIService
-from services.payment_service import PaymentService
-from handlers.commands import (
-    start_command,
-    help_command,
-    stats_command,
-    balance_command,
-    restart_command,
-    questionnaire_command,
-    status_command,
-    debug_command
+from config.settings import config
+from models.session import UserSession, BotStatistics
+from models.enums import BotState, QuestionType, NicheCategory
+from services.data_manager import data_manager
+from services.openai_service import OpenAIService, analyze_user_profile, generate_detailed_plan
+from core.question_engine import question_engine
+from utils.formatters import (
+    format_question_text, format_session_summary, format_niche_details,
+    format_openai_usage, format_user_profile, create_niche_selection_keyboard,
+    get_random_praise, get_random_encouragement
 )
-from handlers.callbacks import (
-    handle_callback_query,
-    handle_multiselect,
-    handle_slider
-)
-from handlers.questionnaire import handle_text_answer
-from models.enums import BotState
-from models.session import UserSession
 
 logger = logging.getLogger(__name__)
 
 class BusinessNavigatorBot:
-    """Основной класс бота Бизнес-Навигатора"""
+    """Основной класс бота Бизнес-Навигатор"""
     
-    def __init__(self, config):  
-        """
-        Инициализация бота
-        
-        Args:
-            config: Объект конфигурации BotConfig
-        """
+    def __init__(self, config):
         self.config = config
-        self.application: Optional[Application] = None
-        self.data_manager = DataManager()
-        self.question_engine = QuestionEngine(self)
+        self.application = None
+        self.openai_service = OpenAIService() if config.openai_api_key else None
+        self.statistics = BotStatistics()
         
-        # Инициализируем сервисы (если есть ключи)
-        self.openai_service = None
-        if config.openai_api_key:
-            try:
-                self.openai_service = OpenAIService(config)
-            except Exception as e:
-                logger.error(f"❌ Ошибка инициализации OpenAI: {e}")
-        
-        self.payment_service = PaymentService()
-        
-        logger.info(f"🤖 Бот инициализирован. Режим AI: {'Включен' if self.openai_service else 'Выключен'}")
-    
-    async def run(self):
-        """Запуск бота в режиме polling"""
-        try:
-            # Создаем Application
-            self.application = Application.builder() \
-                .token(self.config.telegram_token) \
-                .post_init(self._post_init) \
-                .post_shutdown(self._post_shutdown) \
-                .build()
-            
-            # Регистрируем обработчики
-            self._setup_handlers()
-            
-            logger.info("🔄 Запуск бота в режиме polling...")
-            await self.application.run_polling(
-                allowed_updates=['message', 'callback_query'],
-                drop_pending_updates=True,
-                close_loop=False
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка при запуске бота: {e}", exc_info=True)
-            raise
-    
-    def _setup_handlers(self):
+    def setup_handlers(self):
         """Настройка обработчиков команд и сообщений"""
-        # Команды
-        self.application.add_handler(CommandHandler("start", start_command))
-        self.application.add_handler(CommandHandler("help", help_command))
-        self.application.add_handler(CommandHandler("stats", stats_command))
-        self.application.add_handler(CommandHandler("balance", balance_command))
-        self.application.add_handler(CommandHandler("restart", restart_command))
-        self.application.add_handler(CommandHandler("questionnaire", questionnaire_command))
-        self.application.add_handler(CommandHandler("status", status_command))
-        self.application.add_handler(CommandHandler("debug", debug_command))
+        # Обработчики команд
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+        self.application.add_handler(CommandHandler("stats", self.stats_command))
+        self.application.add_handler(CommandHandler("profile", self.profile_command))
+        self.application.add_handler(CommandHandler("restart", self.restart_command))
+        self.application.add_handler(CommandHandler("test", self.test_command))
         
-        # Callback-запросы (кнопки)
-        self.application.add_handler(CallbackQueryHandler(
-            handle_callback_query,
-            pattern="^(?!multiselect_|slider_).*"
-        ))
+        # Обработчики анкеты
+        from handlers.questionnaire import (
+            start_questionnaire, handle_text_answer, handle_button_answer,
+            skip_question, show_progress
+        )
         
-        # Мультиселект
-        self.application.add_handler(CallbackQueryHandler(
-            handle_multiselect,
-            pattern="^multiselect_"
-        ))
+        self.application.add_handler(CommandHandler("questionnaire", start_questionnaire))
+        self.application.add_handler(CommandHandler("progress", show_progress))
+        self.application.add_handler(CommandHandler("skip", skip_question))
         
-        # Слайдеры
-        self.application.add_handler(CallbackQueryHandler(
-            handle_slider,
-            pattern="^slider_"
-        ))
-        
-        # Текстовые ответы (только когда пользователь в состоянии анкеты)
+        # Обработчики текстовых сообщений
         self.application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_text_answer
+            filters.TEXT & ~filters.COMMAND, handle_text_answer
         ))
         
-        logger.info("✅ Обработчики зарегистрированы")
-    
-    async def _post_init(self, application: Application):
-        """Вызывается после инициализации бота"""
-        logger.info("✅ Бот инициализирован и готов к работе")
+        # Обработчики callback-запросов (кнопки)
+        self.application.add_handler(CallbackQueryHandler(handle_button_answer))
         
-        # Сохраняем ссылку на application для доступа из других мест
-        self.application = application
+        # Обработчики выбора ниши
+        self.application.add_handler(CallbackQueryHandler(
+            self.handle_niche_selection, pattern="^select_niche_"
+        ))
+        self.application.add_handler(CallbackQueryHandler(
+            self.handle_restart_questionnaire, pattern="^restart_questionnaire$"
+        ))
+        self.application.add_handler(CallbackQueryHandler(
+            self.handle_show_profile, pattern="^show_profile$"
+        ))
         
-        # Проверяем сессии при запуске
-        active_sessions = self.data_manager.get_active_sessions_count()
-        logger.info(f"📊 Активных сессий: {active_sessions}")
+        logger.info("✅ Обработчики команд настроены")
+    
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /start"""
+        user = update.effective_user
+        user_id = user.id
         
-        # ИСПРАВЛЕНИЕ: Запускаем очистку сессий когда event loop уже работает
-        try:
-            if hasattr(self.data_manager, 'async_start_cleanup'):
-                cleanup_task = await self.data_manager.async_start_cleanup()
-                if cleanup_task:
-                    logger.info("✅ Задача очистки сессий запущена")
-                else:
-                    logger.warning("⚠️ Не удалось запустить задачу очистки сессий")
-            else:
-                logger.warning("⚠️ DataManager не имеет метода async_start_cleanup")
-        except Exception as e:
-            logger.error(f"❌ Ошибка запуска очистки сессий: {e}")
+        logger.info(f"👤 Пользователь {user_id} ({user.username}) запустил бота")
         
-        # Запускаем проверку баланса OpenAI если есть сервис
-        if self.openai_service:
-            try:
-                # Сразу проверяем доступность
-                available, info = await self.openai_service.check_availability()
-                if available:
-                    logger.info(f"✅ OpenAI доступен: {info}")
-                    
-                    # Запускаем периодическую проверку
-                    application.create_task(self.openai_service.periodic_balance_check())
-                else:
-                    logger.warning(f"⚠️ OpenAI проблемы: {info}")
-                    logger.warning("Будет работать в базовом режиме")
-                    self.openai_service = None
-                    
-            except Exception as e:
-                logger.error(f"❌ Ошибка проверки OpenAI: {e}")
-                self.openai_service = None
-        else:
-            logger.info("🤖 OpenAI отключен, используется базовый режим")
-    
-    async def _post_shutdown(self, application: Application):
-        """Вызывается перед выключением бота"""
-        logger.info("🛑 Бот выключается...")
+        # Обновляем статистику
+        self.statistics.add_user()
+        self.statistics.add_message()
         
-        # Останавливаем задачу очистки сессий
-        try:
-            if hasattr(self.data_manager, 'stop_cleanup'):
-                await self.data_manager.stop_cleanup()
-                logger.info("✅ Задача очистки сессий остановлена")
-        except Exception as e:
-            logger.error(f"❌ Ошибка остановки очистки сессий: {e}")
+        welcome_text = (
+            "👋 *Добро пожаловать в Бизнес-Навигатор v7.0!*\n\n"
+            "Я помогу вам найти идеальную бизнес-нишу на основе:\n"
+            "• 🧠 Вашей личности и мотивации\n"
+            "• 🔧 Навыков и компетенций\n"
+            "• 🌟 Ценностей и интересов\n"
+            "• 🚫 Ограничений и возможностей\n\n"
+            "*Доступные команды:*\n"
+            "📋 /questionnaire - Начать анкету (35 вопросов)\n"
+            "📊 /profile - Посмотреть мой профиль\n"
+            "📈 /stats - Статистика бота\n"
+            "🔄 /restart - Начать заново\n"
+            "❓ /help - Помощь\n\n"
+            "💡 *Совет:* Для наилучшего результата отвечайте честно и подробно!"
+        )
         
-        # Сохраняем статистику при выключении
-        try:
-            # Если есть метод save_statistics
-            if hasattr(self.data_manager, 'save_statistics'):
-                self.data_manager.save_statistics()
-                logger.info("📈 Статистика сохранена")
-            
-            # Сохраняем все активные сессии
-            sessions = self.data_manager.get_all_sessions()
-            for session in sessions:
-                self.data_manager.save_session(session)
-            logger.info(f"💾 Сохранено {len(sessions)} сессий")
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка сохранения данных при выключении: {e}")
-    
-    def get_user_session(self, user_id: int) -> Optional[UserSession]:
-        """Получить сессию пользователя"""
-        return self.data_manager.get_session(user_id)
-    
-    def save_user_session(self, session: UserSession):
-        """Сохранить сессию пользователя"""
-        self.data_manager.save_session(session)
-    
-    async def send_message(self, chat_id: int, text: str, **kwargs):
-        """Отправить сообщение пользователю"""
-        if self.application and self.application.bot:
-            try:
-                await self.application.bot.send_message(
-                    chat_id=chat_id,
-                    text=text,
-                    **kwargs
-                )
-                # Увеличиваем счетчик сообщений
-                self.data_manager.increment_messages()
-            except Exception as e:
-                logger.error(f"❌ Ошибка отправки сообщения: {e}")
-        else:
-            logger.error("❌ Бот не инициализирован для отправки сообщения")
-    
-    async def send_question(self, user_id: int, question_data: Dict[str, Any]):
-        """Отправить вопрос пользователю"""
-        session = self.get_user_session(user_id)
-        if session:
-            await self.question_engine.send_question(user_id, session, question_data)
-    
-    async def complete_questionnaire(self, user_id: int):
-        """Завершить анкетирование и выдать результат"""
-        session = self.get_user_session(user_id)
-        if not session:
-            logger.error(f"❌ Сессия не найдена для пользователя {user_id}")
-            return
+        await update.message.reply_text(welcome_text, parse_mode='Markdown')
         
-        try:
-            logger.info(f"📋 Завершение анкеты для пользователя {user_id}")
-            
-            # Помечаем профиль как завершенный
-            self.data_manager.mark_profile_completed(user_id)
-            
-            # Здесь будет логика анализа ответов и генерации рекомендаций
-            if self.openai_service and session.answers:
-                # Используем AI для анализа
-                logger.info(f"🤖 Генерация рекомендаций через OpenAI для пользователя {user_id}")
-                try:
-                    recommendations = await self.openai_service.generate_recommendations(session)
-                    session.recommendations = recommendations
-                    
-                    # Добавляем сгенерированные ниши в статистику
-                    if hasattr(recommendations, 'niches') and recommendations.niches:
-                        niches_count = len(recommendations.niches)
-                        self.data_manager.add_generated_niches(niches_count)
-                    
-                    # Добавляем сгенерированный план
-                    self.data_manager.add_generated_plan()
-                    
-                except Exception as e:
-                    logger.error(f"❌ Ошибка генерации рекомендаций OpenAI: {e}")
-                    session.recommendations = "Базовые рекомендации (ошибка AI анализа)"
-            else:
-                # Базовые рекомендации (без AI)
-                logger.info(f"📊 Генерация базовых рекомендаций для пользователя {user_id}")
-                session.recommendations = (
-                    "🎯 *Базовые рекомендации (режим без AI)*\n\n"
-                    "На основе ваших ответов рекомендуем:\n\n"
-                    "1. **Начните с малого** - выберите одну нишу и сфокусируйтесь на ней\n"
-                    "2. **Используйте свои навыки** - развивайте то, что уже умеете\n"
-                    "3. **Учитесь на практике** - не бойтесь делать ошибки\n"
-                    "4. **Ищите ментора** - опытный советник ускорит ваш рост\n\n"
-                    "Для персонализированных рекомендаций включите OpenAI в настройках."
-                )
-            
-            # Обновляем состояние
-            session.current_state = BotState.COMPLETED
-            session.completed_at = datetime.now()
-            self.save_user_session(session)
-            
-            # Отправляем результаты
-            await self.send_message(
-                chat_id=user_id,
-                text="✅ *Анкета завершена!*\n\n"
-                    "Вот ваши персонализированные рекомендации:\n\n"
-                    f"{session.recommendations[:1500]}..."  # Ограничиваем длину
-            )
-            
-            # Предлагаем следующие шаги
-            keyboard = [
-                [{"text": "📋 Подробный план действий", "callback_data": "detailed_plan"}],
-                [{"text": "💼 Выбрать нишу", "callback_data": "select_niche"}],
-                [{"text": "🔄 Пройти заново", "callback_data": "restart_full"}]
-            ]
-            
-            await self.send_message(
-                chat_id=user_id,
-                text="🎯 *Что дальше?*\n"
-                    "Вы можете:\n"
-                    "• Получить детальный план действий\n"
-                    "• Выбрать конкретную бизнес-нишу\n"
-                    "• Пройти анкету заново",
-                reply_markup={"inline_keyboard": keyboard}
-            )
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка завершения анкеты: {e}", exc_info=True)
-            await self.send_message(
-                chat_id=user_id,
-                text="❌ Произошла ошибка при обработке ваших ответов. Попробуйте позже или обратитесь к администратору."
-            )
-    
-    async def send_error_message(self, user_id: int, error_message: str):
-        """Отправить сообщение об ошибке"""
-        await self.send_message(
-            chat_id=user_id,
-            text=f"❌ *Ошибка:* {error_message}\n\n"
-                 "Попробуйте позже или обратитесь к администратору."
+        # Предлагаем начать анкету
+        keyboard = [
+            [InlineKeyboardButton("📋 Начать анкету", callback_data="start_questionnaire")],
+            [InlineKeyboardButton("❓ Как это работает?", callback_data="how_it_works")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "Хотите начать поиск вашей идеальной бизнес-ниши?",
+            reply_markup=reply_markup
         )
     
-    async def broadcast_message(self, message: str, user_ids: List[int] = None):
-        """Отправить сообщение нескольким пользователям"""
-        if not user_ids:
-            # Если не указаны ID, берем всех активных пользователей
-            sessions = self.data_manager.get_all_sessions()
-            user_ids = [session.user_id for session in sessions]
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /help"""
+        help_text = (
+            "🆘 *Помощь по Бизнес-Навигатору v7.0*\n\n"
+            "*Основные команды:*\n"
+            "📋 /questionnaire - Начать/продолжить анкету\n"
+            "📊 /profile - Посмотреть ваш профиль и прогресс\n"
+            "📈 /stats - Статистика бота и использование OpenAI\n"
+            "🔄 /restart - Начать анкету заново\n"
+            "⏭️ /skip - Пропустить текущий вопрос (если возможно)\n"
+            "📝 /progress - Показать прогресс анкеты\n\n"
+            
+            "*Как это работает:*\n"
+            "1. Вы проходите анкету из 35 вопросов\n"
+            "2. Я анализирую ваши ответы с помощью ИИ\n"
+            "3. Подбираю 5 подходящих бизнес-ниш\n"
+            "4. Вы выбираете нишу и получаете детальный план\n\n"
+            
+            "*Типы вопросов:*\n"
+            "🔘 Кнопки - выберите один вариант\n"
+            "✅ Мультиселект - выберите несколько вариантов\n"
+            "📊 Ползунок - оцените по шкале\n"
+            "📝 Текст - напишите развернутый ответ\n\n"
+            
+            "💡 *Советы:*\n"
+            "• Отвечайте честно для точных рекомендаций\n"
+            "• Не бойтесь писать подробные ответы\n"
+            "• Можно вернуться к анкете в любой момент\n"
+            "• Данные сохраняются между сессиями\n\n"
+            
+            "❓ *Есть вопросы?* Пишите @ваш_аккаунт_поддержки"
+        )
         
-        success_count = 0
-        for user_id in user_ids:
-            try:
-                await self.send_message(chat_id=user_id, text=message)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"❌ Ошибка отправки broadcast пользователю {user_id}: {e}")
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+        self.statistics.add_message()
+    
+    async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /stats"""
+        user = update.effective_user
         
-        logger.info(f"📢 Broadcast отправлен: {success_count}/{len(user_ids)} успешно")
-
-# Глобальная переменная для доступа к экземпляру бота (опционально)
-bot_instance = None
-
-async def get_bot_instance(config=None):
-    """Получить или создать экземпляр бота"""
-    global bot_instance
+        # Обновляем статистику активных сессий
+        active_sessions = data_manager.get_active_sessions_count()
+        self.statistics.update_active_sessions(active_sessions)
+        
+        stats_text = (
+            f"📊 *Статистика Бизнес-Навигатора v7.0*\n\n"
+            f"*Общая статистика:*\n"
+            f"👥 Пользователей: {self.statistics.total_users}\n"
+            f"📋 Сессий: {self.statistics.total_sessions}\n"
+            f"✅ Завершено: {self.statistics.completed_sessions}\n"
+            f"💬 Сообщений: {self.statistics.total_messages}\n"
+            f"⚡ Активных: {self.statistics.active_sessions}\n"
+            f"⏱️ Uptime: {self.statistics.get_uptime()}\n\n"
+        )
+        
+        # Добавляем статистику OpenAI если есть
+        if hasattr(self.statistics, 'openai_requests') and self.statistics.openai_requests > 0:
+            stats_text += (
+                f"*Использование OpenAI:*\n"
+                f"🤖 Запросов: {self.statistics.openai_requests}\n"
+                f"🔤 Токенов: {self.statistics.openai_tokens:,}\n"
+                f"💵 Стоимость: ${self.statistics.openai_cost:.4f}\n\n"
+            )
+        
+        # Информация о конфигурации
+        stats_text += (
+            f"*Конфигурация:*\n"
+            f"📝 Вопросов: {len(config.questions)}\n"
+            f"🏢 Ниш: {len(config.niche_categories)}\n"
+            f"🤖 Модель: {config.openai_model}\n"
+            f"🌐 Язык: {config.bot_language}\n\n"
+            
+            f"*Ваша сессия:*\n"
+            f"🆔 ID: {user.id}\n"
+            f"👤 Username: {user.username or 'не указан'}\n"
+            f"📅 Регистрация: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        )
+        
+        await update.message.reply_text(stats_text, parse_mode='Markdown')
+        self.statistics.add_message()
     
-    if bot_instance is None and config is not None:
-        bot_instance = BusinessNavigatorBot(config)
+    async def profile_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /profile"""
+        user = update.effective_user
+        user_id = user.id
+        
+        # Получаем сессию пользователя
+        session = data_manager.get_session(user_id)
+        
+        if not session:
+            # Создаем новую сессию
+            session = data_manager.create_session(
+                user_id=user_id,
+                username=user.username or "",
+                full_name=user.full_name or ""
+            )
+            
+            profile_text = (
+                "👤 *ВАШ ПРОФИЛЬ*\n\n"
+                f"🆔 ID: {user_id}\n"
+                f"👤 Имя: {user.full_name or 'Не указано'}\n"
+                f"📅 Создан: {datetime.now().strftime('%d.%m.%Y')}\n\n"
+                "📋 *Анкета:* не начата\n\n"
+                "ℹ️ Начните анкету командой /questionnaire"
+            )
+        else:
+            # Форматируем профиль существующей сессии
+            profile_text = format_user_profile(session)
+            
+            # Добавляем информацию о прогрессе
+            progress = session.get_progress_percentage()
+            profile_text += f"\n\n🎯 *Прогресс:* {progress:.1f}%"
+            
+            if session.is_completed:
+                profile_text += "\n\n✅ *Анкета завершена!*"
+                
+                if session.suggested_niches:
+                    profile_text += f"\n🎯 Найдено ниш: {len(session.suggested_niches)}"
+                
+                if session.selected_niche:
+                    profile_text += f"\n📌 Выбрана ниша: {session.selected_niche.name}"
+                    profile_text += "\n📋 Детальный план готов!"
+            else:
+                profile_text += f"\n\n📝 *Текущий вопрос:* {session.current_question_index + 1}/35"
+                profile_text += "\nℹ️ Продолжите анкету командой /questionnaire"
+        
+        # Создаем клавиатуру действий
+        keyboard = []
+        
+        if session and not session.is_completed:
+            keyboard.append([InlineKeyboardButton("📋 Продолжить анкету", callback_data="continue_questionnaire")])
+        
+        if session and session.is_completed and session.suggested_niches:
+            keyboard.append([InlineKeyboardButton("🎯 Показать ниши", callback_data="show_niches")])
+        
+        keyboard.append([InlineKeyboardButton("🔄 Начать заново", callback_data="restart_questionnaire")])
+        keyboard.append([InlineKeyboardButton("📊 Статистика", callback_data="show_stats")])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            profile_text,
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        self.statistics.add_message()
     
-    return bot_instance
+    async def restart_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /restart"""
+        user = update.effective_user
+        user_id = user.id
+        
+        # Получаем сессию
+        session = data_manager.get_session(user_id)
+        
+        if session:
+            # Сбрасываем сессию
+            session.current_state = BotState.START
+            session.current_question_index = 0
+            session.is_completed = False
+            session.completion_date = None
+            session.analysis_result = ""
+            session.suggested_niches = []
+            session.selected_niche = None
+            session.detailed_plan = ""
+            
+            data_manager.save_session(session)
+            
+            await update.message.reply_text(
+                "🔄 *Сессия сброшена!*\n\n"
+                "Все ваши предыдущие ответы удалены.\n"
+                "Можете начать анкету заново с чистого листа.\n\n"
+                "Нажмите кнопку ниже чтобы начать:",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                "ℹ️ У вас еще нет активной сессии.\n"
+                "Начните анкету командой /questionnaire",
+                parse_mode='Markdown'
+            )
+        
+        self.statistics.add_message()
+    
+    async def test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Тестовая команда для отладки"""
+        test_text = (
+            "🧪 *Тест системы*\n\n"
+            f"✅ Конфигурация загружена\n"
+            f"📝 Вопросов: {len(config.questions)}\n"
+            f"🏢 Ниш: {len(config.niche_categories)}\n"
+            f"🤖 OpenAI: {'✅ Доступен' if self.openai_service and self.openai_service.is_initialized else '❌ Не доступен'}\n"
+            f"💾 Data Manager: {'✅ Работает' if data_manager else '❌ Не работает'}\n\n"
+            
+            f"📊 *Статистика:*\n"
+            f"• Пользователей: {self.statistics.total_users}\n"
+            f"• Сообщений: {self.statistics.total_messages}\n"
+            f"• Uptime: {self.statistics.get_uptime()}"
+        )
+        
+        await update.message.reply_text(test_text, parse_mode='Markdown')
+        self.statistics.add_message()
+    
+    async def handle_niche_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка выбора ниши"""
+        query = update.callback_query
+        await query.answer()
+        
+        niche_id = query.data.replace("select_niche_", "")
+        
+        user_id = update.effective_user.id
+        session = data_manager.get_session(user_id)
+        
+        if not session or not session.suggested_niches:
+            await query.edit_message_text(
+                "❌ Сессия не найдена или ниши не сгенерированы.\n"
+                "Пройдите анкету заново.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Находим выбранную нишу
+        selected_niche = None
+        for niche in session.suggested_niches:
+            if niche.id == niche_id:
+                selected_niche = niche
+                break
+        
+        if not selected_niche:
+            await query.edit_message_text(
+                "❌ Выбранная ниша не найдена.",
+                parse_mode='Markdown'
+            )
+            return
+        
+        # Показываем детали ниши
+        niche_details = format_niche_details(selected_niche, detailed=True)
+        
+        # Кнопки для выбора действия
+        keyboard = [
+            [InlineKeyboardButton("📋 Получить детальный план", callback_data=f"get_plan_{niche_id}")],
+            [InlineKeyboardButton("🎯 Показать другие ниши", callback_data="show_other_niches")],
+            [InlineKeyboardButton("🔄 Пройти заново", callback_data="restart_questionnaire")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            f"🎯 *ВЫБРАНА НИША: {selected_niche.emoji} {selected_niche.name}*\n\n"
+            f"{niche_details}\n\n"
+            f"Хотите получить детальный пошаговый план?",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+    
+    async def handle_restart_questionnaire(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка перезапуска анкеты"""
+        query = update.callback_query
+        await query.answer()
+        
+        user_id = update.effective_user.id
+        
+        # Получаем или создаем сессию
+        session = data_manager.get_session(user_id)
+        if not session:
+            user = update.effective_user
+            session = data_manager.create_session(
+                user_id=user_id,
+                username=user.username or "",
+                full_name=user.full_name or ""
+            )
+        
+        # Сбрасываем сессию
+        session.current_state = BotState.START
+        session.current_question_index = 0
+        session.is_completed = False
+        session.completion_date = None
+        session.analysis_result = ""
+        session.suggested_niches = []
+        session.selected_niche = None
+        session.detailed_plan = ""
+        
+        data_manager.save_session(session)
+        
+        # Запускаем анкету
+        from handlers.questionnaire import start_questionnaire
+        await start_questionnaire(update, context)
+    
+    async def handle_show_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка показа профиля"""
+        query = update.callback_query
+        await query.answer()
+        
+        # Создаем фейковый update для команды /profile
+        class FakeUpdate:
+            def __init__(self, original_update):
+                self.effective_user = original_update.effective_user
+                self.message = type('obj', (object,), {
+                    'reply_text': query.edit_message_text,
+                    'chat_id': query.message.chat_id,
+                    'message_id': query.message.message_id
+                })()
+        
+        fake_update = FakeUpdate(update)
+        await self.profile_command(fake_update, context)
+    
+    async def run(self):
+        """Запуск бота"""
+        try:
+            # Создаем приложение
+            self.application = Application.builder().token(self.config.telegram_token).build()
+            
+            # Настраиваем обработчики
+            self.setup_handlers()
+            
+            # Запускаем polling
+            logger.info("▶️ Запускаю бота в режиме polling...")
+            await self.application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка запуска бота: {e}")
+            raise
