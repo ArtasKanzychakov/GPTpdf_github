@@ -336,3 +336,82 @@ class OpenAIUsage:
     
     def __str__(self) -> str:
         return f"Requests: {self.total_requests}, Tokens: {self.total_tokens}, Cost: ${self.total_cost:.4f}"
+@dataclass
+class BotStatistics:
+    """Статистика работы бота"""
+    total_users: int = 0
+    total_sessions: int = 0
+    completed_sessions: int = 0
+    total_messages: int = 0
+    active_sessions: int = 0
+    start_time: datetime = field(default_factory=datetime.now)
+    
+    # OpenAI статистика
+    openai_requests: int = 0
+    openai_tokens: int = 0
+    openai_cost: float = 0.0
+    
+    def add_user(self):
+        """Добавить пользователя"""
+        self.total_users += 1
+    
+    def add_session(self):
+        """Добавить сессию"""
+        self.total_sessions += 1
+    
+    def complete_session(self):
+        """Завершить сессию"""
+        self.completed_sessions += 1
+    
+    def add_message(self):
+        """Добавить сообщение"""
+        self.total_messages += 1
+    
+    def add_openai_request(self, tokens: int, cost: float = 0.0):
+        """Добавить запрос к OpenAI"""
+        self.openai_requests += 1
+        self.openai_tokens += tokens
+        self.openai_cost += cost
+    
+    def update_active_sessions(self, count: int):
+        """Обновить количество активных сессий"""
+        self.active_sessions = count
+    
+    def get_uptime(self) -> str:
+        """Получить время работы"""
+        uptime = datetime.now() - self.start_time
+        days = uptime.days
+        hours, remainder = divmod(uptime.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        if days > 0:
+            return f"{days}д {hours}ч {minutes}м"
+        elif hours > 0:
+            return f"{hours}ч {minutes}м {seconds}с"
+        else:
+            return f"{minutes}м {seconds}с"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Конвертировать в словарь"""
+        return {
+            'total_users': self.total_users,
+            'total_sessions': self.total_sessions,
+            'completed_sessions': self.completed_sessions,
+            'total_messages': self.total_messages,
+            'active_sessions': self.active_sessions,
+            'uptime': self.get_uptime(),
+            'openai_requests': self.openai_requests,
+            'openai_tokens': self.openai_tokens,
+            'openai_cost': self.openai_cost,
+            'start_time': self.start_time.isoformat()
+        }
+    
+    def __str__(self) -> str:
+        return (
+            f"👥 Пользователей: {self.total_users}\n"
+            f"📊 Сессий: {self.total_sessions} ({self.completed_sessions} завершено)\n"
+            f"💬 Сообщений: {self.total_messages}\n"
+            f"⚡ Активных: {self.active_sessions}\n"
+            f"⏱️ Uptime: {self.get_uptime()}\n"
+            f"🤖 OpenAI: {self.openai_requests} запросов, {self.openai_tokens} токенов"
+        )
