@@ -15,10 +15,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Сначала импортируем только setup_logging
-from utils.logger import setup_logging
+try:
+    from utils.logger import setup_logging
+    # Настраиваем логирование сразу
+    setup_logging()
+except ImportError as e:
+    print(f"❌ Не могу импортировать setup_logging: {e}")
+    print("Проверьте наличие utils/logger.py")
+    sys.exit(1)
 
-# Настраиваем логирование сразу
-setup_logging()
 logger = logging.getLogger(__name__)
 
 # Теперь импортируем остальное
@@ -30,6 +35,11 @@ try:
 except ImportError as e:
     logger.error(f"❌ Ошибка импорта модулей: {e}")
     logger.error("Проверьте структуру проекта и зависимости")
+    logger.error("Убедитесь, что все файлы на месте:")
+    logger.error("  - config/settings.py")
+    logger.error("  - core/bot.py")
+    logger.error("  - services/health_check.py")
+    logger.error("  - services/openai_service.py")
     sys.exit(1)
 
 # Глобальная переменная для graceful shutdown
@@ -38,9 +48,6 @@ bot_instance = None
 def signal_handler(signum, frame):
     """Обработчик сигналов для graceful shutdown"""
     logger.info(f"📶 Получен сигнал {signum}, начинаю graceful shutdown...")
-    if bot_instance:
-        # Здесь можно добавить логику остановки бота
-        pass
     sys.exit(0)
 
 async def main():
@@ -56,9 +63,8 @@ async def main():
         python_version = sys.version_info
         logger.info(f"🐍 Python версия: {python_version.major}.{python_version.minor}.{python_version.micro}")
         
-        if not (python_version.major == 3 and python_version.minor == 9):
-            logger.warning(f"⚠️ Рекомендуется Python 3.9.x. Текущая: {sys.version}")
-            logger.warning("Бот может работать, но возможны проблемы с совместимостью")
+        if not (python_version.major == 3 and python_version.minor >= 9):
+            logger.warning(f"⚠️ Рекомендуется Python 3.9+. Текущая: {sys.version}")
         
         # Загрузка конфигурации
         logger.info("⚙️ Загружаю конфигурацию...")
@@ -90,21 +96,8 @@ async def main():
         if config.openai_api_key:
             logger.info("🔍 Проверяем подключение к OpenAI...")
             try:
-                openai_service = OpenAIService()
-                
                 if openai_service.is_initialized:
                     logger.info("✅ OpenAI клиент инициализирован")
-                    
-                    # Быстрая проверка доступности (не блокирующая)
-                    logger.info("⏳ Тестируем соединение с OpenAI...")
-                    
-                    # Создаем задачу с таймаутом
-                    try:
-                        # Простая проверка без реального запроса
-                        logger.info("✅ OpenAI доступен (проверка пройдена)")
-                    except Exception as e:
-                        logger.warning(f"⚠️ OpenAI проблемы: {e}")
-                        logger.warning("Будет работать в базовом режиме")
                 else:
                     logger.warning("⚠️ OpenAI клиент не инициализирован")
                     logger.warning("Будет работать в базовом режиме")
