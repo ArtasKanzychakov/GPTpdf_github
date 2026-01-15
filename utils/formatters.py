@@ -184,6 +184,44 @@ def format_analysis_result(analysis_text: str) -> str:
 
     return f"🧠 *Психологический анализ вашего профиля*\n\n{analysis_text}\n\n---"
 
+def format_openai_usage(usage_data: Dict[str, Any]) -> str:
+    """
+    Форматирование информации об использовании OpenAI
+    
+    Args:
+        usage_data: Словарь с данными использования
+    
+    Returns:
+        Отформатированная информация
+    """
+    if not usage_data:
+        return "📊 *Использование OpenAI:* данные недоступны"
+    
+    try:
+        # Получаем данные из объекта или словаря
+        if hasattr(usage_data, 'total_requests'):
+            requests = usage_data.total_requests
+            tokens = usage_data.total_tokens
+            cost = usage_data.total_cost
+        else:
+            requests = usage_data.get('total_requests', 0)
+            tokens = usage_data.get('total_tokens', 0)
+            cost = usage_data.get('total_cost', 0.0)
+        
+        # Форматируем числа
+        tokens_formatted = f"{tokens:,}".replace(",", " ")
+        cost_formatted = f"{cost:.4f}"
+        
+        return (
+            f"📊 *Использование OpenAI:*\n"
+            f"• Запросов: {requests}\n"
+            f"• Токенов: {tokens_formatted}\n"
+            f"• Стоимость: ${cost_formatted}"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка форматирования OpenAI usage: {e}")
+        return "📊 *Использование OpenAI:* ошибка форматирования"
+
 def get_random_praise() -> str:
     """
     Получить случайную похвалу
