@@ -1,14 +1,18 @@
 services:
   - type: web
-    name: business-navigator-bot
-    runtime: docker  # Это самое важное
-    plan: free
-    dockerfilePath: ./Dockerfile
+    name: business-navigator
+    env: python
+    region: oregon  # Или другой, где у вас база
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /health
+    autoDeploy: true
     envVars:
+      - key: DATABASE_URL
+        sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: PORT
-        value: "10000"
-    healthCheckPath: /health
+        value: 10000
