@@ -9,6 +9,7 @@ import os
 import sys
 import signal
 import logging
+import threading
 from pathlib import Path
 
 # Добавляем путь к модулям
@@ -60,38 +61,38 @@ try:
 except ImportError:
     logger.warning("⚠️ Модуль data_manager не найден, создаю временный менеджер данных")
     data_manager_available = False
-    
+
     # Создаем временный менеджер данных
     from models.session import UserSession
-    
+
     class TempDataManager:
         def __init__(self):
             self.sessions = {}
             logger.info("📝 Создан временный менеджер данных (данные не сохраняются)")
-        
+
         def initialize(self):
             logger.info("🔄 Инициализация временного менеджера данных")
-        
+
         def get_session(self, user_id):
             return self.sessions.get(user_id)
-        
+
         def create_session(self, user_id, username="", full_name=""):
             session = UserSession(user_id=user_id, username=username, full_name=full_name)
             self.sessions[user_id] = session
             logger.info(f"📝 Создана временная сессия для пользователя {user_id}")
             return session
-        
+
         def save_session(self, session):
             self.sessions[session.user_id] = session
             logger.debug(f"💾 Сессия пользователя {session.user_id} сохранена во временное хранилище")
-        
+
         def cleanup_old_sessions(self, days=7):
             return 0
-        
+
         def get_statistics(self):
             from models.session import BotStatistics
             return BotStatistics()
-    
+
     data_manager = TempDataManager()
 
 # Глобальная переменная для graceful shutdown
@@ -102,23 +103,36 @@ def signal_handler(signum, frame):
     logger.info(f"📶 Получен сигнал {signum}, начинаю graceful shutdown...")
     sys.exit(0)
 
+def run_health_check_server(host: str, port: int):
+    """Запуск health check сервера в отдельном потоке"""
+    try:
+        # Создаем новый event loop для этого потока
+        import asyncio as async_io
+        loop = async_io.new_event_loop()
+        async_io.set_event_loop(loop)
+        
+        # Запускаем сервер
+        loop.run_until_complete(start_health_check_server(host=host, port=port))
+    except Exception as e:
+        logger.error(f"❌ Ошибка health check сервера: {e}")
+
 async def main():
     """Основная функция запуска бота"""
     global bot_instance
-    
+
     try:
         logger.info("=" * 60)
         logger.info("🚀 ЗАПУСК БИЗНЕС-НАВИГАТОРА v7.0")
         logger.info("=" * 60)
-        
+
         # Проверка Python версии
         python_version = sys.version_info
         logger.info(f"🐍 Python версия: {python_version.major}.{python_version.minor}.{python_version.micro}")
-        
+
         # Загрузка конфигурации
         logger.info("⚙️ Загружаю конфигурацию...")
         config = BotConfig()
-        
+
         # Проверяем наличие обязательных переменных
         if not config.telegram_token:
             logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА: TELEGRAM_BOT_TOKEN не найден!")
@@ -129,22 +143,22 @@ async def main():
             logger.error("   - Value: ваш_токен_бота")
             logger.error("3. Перезапустите деплой")
             sys.exit(1)
-        
+
         # Маскируем токен для логов
         masked_token = config.telegram_token
         if len(masked_token) > 8:
             masked_token = masked_token[:4] + "***" + masked_token[-4:]
-        
+
         logger.info(f"✅ Токен бота: {masked_token}")
         logger.info(f"🤖 OpenAI модель: {config.openai_model}")
         logger.info(f"🌐 Язык бота: {config.bot_language}")
         logger.info(f"📝 Вопросов загружено: {len(config.questions)}")
         logger.info(f"🏢 Ниш загружено: {len(config.niche_categories)}")
-        
+
         # Инициализация менеджера данных
         logger.info("💾 Инициализация менеджера данных...")
         data_manager.initialize()
-        
+
         # Проверка OpenAI (если ключ есть и модуль доступен)
         if config.openai_api_key and openai_available:
             logger.info("🔍 Проверяем подключение к OpenAI...")
@@ -162,60 +176,42 @@ async def main():
             logger.warning("⚠️ OPENAI_API_KEY не найден. Будет работать базовый режим без AI.")
         else:
             logger.warning("⚠️ Модуль OpenAI недоступен. Будет работать базовый режим.")
-        
+
+        # ЗАПУСК HEALTH CHECK СЕРВЕРА В ОТДЕЛЬНОМ ПОТОКЕ
+        if health_check_available and start_health_check_server:
+            port = int(os.getenv('PORT', config.port))
+            logger.info(f"🌐 Запускаю health check сервер в отдельном потоке на порту {port}...")
+            
+            health_thread = threading.Thread(
+                target=run_health_check_server,
+                args=(config.host, port),
+                daemon=True  # Демонический поток - завершится с основным процессом
+            )
+            health_thread.start()
+            logger.info("✅ Health check сервер запущен в отдельном потоке")
+        else:
+            logger.info("⚠️ Health check сервер отключен")
+
+        logger.info("-" * 40)
+
+        # Настраиваем обработку сигналов
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
         # Создание бота
         logger.info("🤖 Создаю экземпляр бота...")
         bot = BusinessNavigatorBot(config)
         bot_instance = bot
-        
-        # Запуск health check сервера (если доступен)
-        if health_check_available and start_health_check_server:
-            port = int(os.getenv('PORT', config.port))
-            logger.info(f"🌐 Запускаю health check сервер на порту {port}...")
-            
-            health_task = asyncio.create_task(
-                start_health_check_server(host=config.host, port=port)
-            )
-            logger.info("✅ Health check сервер запущен")
-        else:
-            logger.info("⚠️ Health check сервер отключен")
-            health_task = None
-        
-        logger.info("-" * 40)
-        
-        # Настраиваем обработку сигналов
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        
+
         # Запуск бота
         logger.info("▶️ Запускаю бота в режиме polling...")
         logger.info("ℹ️ Для остановки нажмите Ctrl+C")
-        
-        # Создаем список задач
-        tasks = []
-        bot_task = asyncio.create_task(bot.run())
-        tasks.append(bot_task)
-        
-        if health_task:
-            tasks.append(health_task)
-        
-        # Ожидаем завершения любой из задач
-        if tasks:
-            done, pending = await asyncio.wait(
-                tasks,
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            
-            # Отменяем оставшиеся задачи
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-        
+
+        # ЗАПУСКАЕМ БОТА БЕЗ СОЗДАНИЯ ДОПОЛНИТЕЛЬНЫХ ЗАДАЧ
+        await bot.run()
+
         logger.info("⏹ Бот остановлен")
-        
+
     except KeyboardInterrupt:
         logger.info("⏹ Остановка бота по запросу пользователя (Ctrl+C)")
     except Exception as e:
@@ -231,14 +227,14 @@ def run_bot():
     # Проверяем, что мы на Render (есть переменная PORT)
     port = os.getenv('PORT', '10000')
     logger.info(f"🔧 Порт из окружения: {port}")
-    
+
     # Устанавливаем переменную PORT для конфига
     os.environ['PORT'] = port
-    
+
     # Настраиваем event loop для асинхронной работы
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    
+
     try:
         # Запускаем главную функцию
         asyncio.run(main())
