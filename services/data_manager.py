@@ -1,301 +1,294 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Менеджер данных для хранения сессий пользователей
+Менеджер данных для управления сессиями пользователей
 """
-
-import json
 import logging
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Optional
 from datetime import datetime, timedelta
-import asyncio
 
-from models.session import UserSession, BotStatistics
+from models.session import UserSession, SessionStatus, DemographicData
 
 logger = logging.getLogger(__name__)
 
+
 class DataManager:
-    """Менеджер для работы с данными пользователей"""
+    """Менеджер для работы с пользовательскими сессиями"""
     
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = Path(data_dir)
-        self.sessions: Dict[int, UserSession] = {}
-        self.statistics = BotStatistics()
-        self._lock = asyncio.Lock()
-        
-        # Создаем директорию для данных
-        self.data_dir.mkdir(exist_ok=True)
-    
-    def initialize(self):
+    def __init__(self):
         """Инициализация менеджера данных"""
-        logger.info("📂 Инициализация менеджера данных...")
-        
-        # Загружаем сохраненные сессии
-        self._load_sessions()
-        
-        logger.info(f"✅ Загружено {len(self.sessions)} сессий")
-        logger.info(f"📊 Статистика: {self.statistics}")
+        # Временное хранилище в памяти (до интеграции PostgreSQL)
+        self.sessions: Dict[int, UserSession] = {}
+        logger.info("DataManager инициализирован (in-memory storage)")
     
-    def _load_sessions(self):
-        """Загрузить сессии из файла"""
-        sessions_file = self.data_dir / "sessions.json"
+    async def get_session(self, user_id: int) -> Optional[UserSession]:
+        """
+        Получить сессию пользователя
         
-        if not sessions_file.exists():
-            logger.info("📭 Файл сессий не найден, начинаю с пустого списка")
-            return
+        Args:
+            user_id: ID пользователя в Telegram
         
-        try:
-            with open(sessions_file, 'r', encoding='utf-8') as f:
-                sessions_data = json.load(f)
-            
-            loaded_count = 0
-            for session_data in sessions_data:
-                try:
-                    # Создаем сессию из данных
-                    session = self._create_session_from_dict(session_data)
-                    if session:
-                        self.sessions[session.user_id] = session
-                        loaded_count += 1
-                        
-                        # Обновляем статистику
-                        if session.is_completed:
-                            self.statistics.complete_session()
-                        
-                except Exception as e:
-                    logger.error(f"❌ Ошибка загрузки сессии: {e}")
-            
-            logger.info(f"📥 Загружено {loaded_count} сессий из файла")
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка загрузки файла сессий: {e}")
-    
-    def _create_session_from_dict(self, session_dict: Dict[str, Any]) -> Optional[UserSession]:
-        """Создать сессию из словаря"""
-        try:
-            # Базовые поля
-            user_id = session_dict.get('user_id')
-            if not user_id:
-                return None
-            
-            # Создаем новую сессию
-            session = UserSession(
-                user_id=user_id,
-                username=session_dict.get('username', ''),
-                full_name=session_dict.get('full_name', '')
-            )
-            
-            # Восстанавливаем состояние
-            current_state = session_dict.get('current_state')
-            if current_state:
-                from models.enums import BotState
-                try:
-                    session.current_state = BotState[current_state]
-                except:
-                    pass
-            
-            session.current_question_index = session_dict.get('current_question_index', 0)
-            session.is_completed = session_dict.get('is_completed', False)
-            
-            # Восстанавливаем ответы
-            answers = session_dict.get('answers', {})
-            if answers:
-                self._restore_answers(session, answers)
-            
-            # Восстанавливаем временные метки
-            created_at = session_dict.get('created_at')
-            if created_at:
-                try:
-                    session.created_at = datetime.fromisoformat(created_at)
-                except:
-                    pass
-            
-            updated_at = session_dict.get('updated_at')
-            if updated_at:
-                try:
-                    session.updated_at = datetime.fromisoformat(updated_at)
-                except:
-                    pass
-            
-            return session
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка создания сессии из словаря: {e}")
-            return None
-    
-    def _restore_answers(self, session: UserSession, answers: Dict[str, Any]):
-        """Восстановить ответы в сессию"""
-        try:
-            # Демография
-            demo = answers.get('demographics', {})
-            session.age_group = demo.get('age_group', '')
-            session.education = demo.get('education', '')
-            session.location_type = demo.get('location_type', '')
-            session.location_custom = demo.get('location_custom', '')
-            
-            # Личность
-            personality = answers.get('personality', {})
-            session.motivations = personality.get('motivations', [])
-            session.decision_style = personality.get('decision_style', '')
-            session.risk_scenario = personality.get('risk_scenario', '')
-            session.risk_tolerance = personality.get('risk_tolerance', 0)
-            
-            # Энергетический профиль
-            energy = personality.get('energy_profile', {})
-            morning = energy.get('morning', 0)
-            day = energy.get('day', 0)
-            evening = energy.get('evening', 0)
-            session.energy_profile = f"{morning} {day} {evening}"
-            
-            session.peak_analytical = energy.get('peak_analytical', '')
-            session.peak_creative = energy.get('peak_creative', '')
-            session.peak_social = energy.get('peak_social', '')
-            
-            session.fears_selected = personality.get('fears', [])
-            session.fear_custom = personality.get('fear_custom', '')
-            
-            # Навыки
-            skills = answers.get('skills', {})
-            session.analytical_skills = skills.get('analytics', 0)
-            session.communication_skills = skills.get('communication', 0)
-            session.design_skills = skills.get('design', 0)
-            session.organizational_skills = skills.get('organization', 0)
-            session.manual_skills = skills.get('manual', 0)
-            session.emotional_iq = skills.get('emotional_iq', 0)
-            session.superpower = skills.get('superpower', '')
-            session.work_style = skills.get('work_style', '')
-            session.learning_style = skills.get('learning_style', '')
-            
-            # Ценности
-            values = answers.get('values', {})
-            session.existential_answer = values.get('existential_answer', '')
-            session.flow_experience = values.get('flow_experience', '')
-            session.flow_feelings = values.get('flow_feelings', '')
-            
-            ideal_client = values.get('ideal_client', {})
-            session.ideal_client_age = ideal_client.get('age', '')
-            session.ideal_client_field = ideal_client.get('field', '')
-            session.ideal_client_pain = ideal_client.get('pain', '')
-            session.ideal_client_details = ideal_client.get('details', '')
-            
-            # Ограничения
-            limitations = answers.get('limitations', {})
-            session.budget = limitations.get('budget', '')
-            session.equipment = limitations.get('equipment', [])
-            session.knowledge_assets = limitations.get('knowledge_assets', [])
-            session.time_per_week = limitations.get('time_per_week', '')
-            session.business_scale = limitations.get('business_scale', '')
-            session.business_format = limitations.get('business_format', '')
-            
-        except Exception as e:
-            logger.error(f"❌ Ошибка восстановления ответов: {e}")
-    
-    def get_session(self, user_id: int) -> Optional[UserSession]:
-        """Получить сессию пользователя"""
-        if user_id in self.sessions:
-            return self.sessions[user_id]
-        return None
-    
-    def create_session(self, user_id: int, username: str = "", full_name: str = "") -> UserSession:
-        """Создать новую сессию"""
-        session = UserSession(
-            user_id=user_id,
-            username=username,
-            full_name=full_name
-        )
+        Returns:
+            UserSession или None
+        """
+        session = self.sessions.get(user_id)
         
-        self.sessions[user_id] = session
-        self.statistics.add_session()
-        self.statistics.add_user()
-        
-        logger.info(f"📝 Создана новая сессия для пользователя {user_id}")
-        self._save_sessions_async()
+        if session:
+            logger.debug(f"Сессия найдена для пользователя {user_id}")
+        else:
+            logger.debug(f"Сессия не найдена для пользователя {user_id}")
         
         return session
     
-    def save_session(self, session: UserSession):
-        """Сохранить сессию"""
-        self.sessions[session.user_id] = session
+    async def create_session(self, user_id: int) -> UserSession:
+        """
+        Создать новую сессию
         
-        # Обновляем статистику
-        if session.is_completed:
-            self.statistics.complete_session()
+        Args:
+            user_id: ID пользователя в Telegram
         
-        # Асинхронное сохранение
-        self._save_sessions_async()
+        Returns:
+            Новая UserSession
+        """
+        session = UserSession(
+            user_id=user_id,
+            status=SessionStatus.STARTED,
+            current_question=1,
+            current_category="demographic"
+        )
+        
+        self.sessions[user_id] = session
+        logger.info(f"Создана новая сессия для пользователя {user_id}")
+        
+        return session
     
-    async def save_session_async(self, session: UserSession):
-        """Сохранить сессию асинхронно"""
-        async with self._lock:
-            self.save_session(session)
-    
-    def _save_sessions_async(self):
-        """Асинхронно сохранить сессии в файл"""
+    async def update_session(self, session: UserSession) -> bool:
+        """
+        Обновить существующую сессию
+        
+        Args:
+            session: Объект сессии
+        
+        Returns:
+            True если успешно
+        """
         try:
-            # Создаем список данных для сохранения
-            sessions_data = []
-            for session in self.sessions.values():
-                try:
-                    session_dict = session.to_dict()
-                    session_dict['answers'] = session.get_all_answers()
-                    session_dict['created_at'] = session.created_at.isoformat()
-                    session_dict['updated_at'] = session.updated_at.isoformat()
-                    sessions_data.append(session_dict)
-                except Exception as e:
-                    logger.error(f"❌ Ошибка сериализации сессии {session.user_id}: {e}")
-            
-            # Сохраняем в файл
-            sessions_file = self.data_dir / "sessions.json"
-            with open(sessions_file, 'w', encoding='utf-8') as f:
-                json.dump(sessions_data, f, ensure_ascii=False, indent=2, default=str)
-            
-            logger.debug(f"💾 Сохранено {len(sessions_data)} сессий")
-            
+            session.update_timestamp()
+            self.sessions[session.user_id] = session
+            logger.debug(f"Сессия обновлена для пользователя {session.user_id}")
+            return True
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения сессий: {e}")
+            logger.error(f"Ошибка обновления сессии: {e}")
+            return False
     
-    def cleanup_old_sessions(self, days: int = 7):
-        """Очистить старые сессии"""
-        cutoff_date = datetime.now() - timedelta(days=days)
-        removed_count = 0
+    async def delete_session(self, user_id: int) -> bool:
+        """
+        Удалить сессию
         
-        user_ids_to_remove = []
+        Args:
+            user_id: ID пользователя
+        
+        Returns:
+            True если успешно
+        """
+        try:
+            if user_id in self.sessions:
+                del self.sessions[user_id]
+                logger.info(f"Сессия удалена для пользователя {user_id}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Ошибка удаления сессии: {e}")
+            return False
+    
+    async def save_answer(
+        self, 
+        user_id: int, 
+        question_id: str, 
+        answer: any
+    ) -> bool:
+        """
+        Сохранить ответ пользователя
+        
+        Args:
+            user_id: ID пользователя
+            question_id: ID вопроса
+            answer: Ответ
+        
+        Returns:
+            True если успешно
+        """
+        session = await self.get_session(user_id)
+        
+        if not session:
+            logger.warning(f"Попытка сохранить ответ для несуществующей сессии: {user_id}")
+            return False
+        
+        try:
+            session.add_answer(question_id, answer)
+            await self.update_session(session)
+            logger.info(f"Ответ сохранен: user={user_id}, question={question_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка сохранения ответа: {e}")
+            return False
+    
+    async def update_temp_data(
+        self, 
+        user_id: int, 
+        key: str, 
+        value: any
+    ) -> bool:
+        """
+        Обновить временные данные сессии
+        
+        Args:
+            user_id: ID пользователя
+            key: Ключ
+            value: Значение
+        
+        Returns:
+            True если успешно
+        """
+        session = await self.get_session(user_id)
+        
+        if not session:
+            return False
+        
+        try:
+            session.temp_data[key] = value
+            await self.update_session(session)
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления temp_data: {e}")
+            return False
+    
+    async def clear_temp_data(self, user_id: int) -> bool:
+        """
+        Очистить временные данные
+        
+        Args:
+            user_id: ID пользователя
+        
+        Returns:
+            True если успешно
+        """
+        session = await self.get_session(user_id)
+        
+        if not session:
+            return False
+        
+        try:
+            session.temp_data = {}
+            await self.update_session(session)
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка очистки temp_data: {e}")
+            return False
+    
+    async def update_status(
+        self, 
+        user_id: int, 
+        status: SessionStatus
+    ) -> bool:
+        """
+        Обновить статус сессии
+        
+        Args:
+            user_id: ID пользователя
+            status: Новый статус
+        
+        Returns:
+            True если успешно
+        """
+        session = await self.get_session(user_id)
+        
+        if not session:
+            return False
+        
+        try:
+            session.status = status
+            
+            if status == SessionStatus.COMPLETED:
+                session.completed_at = datetime.now()
+            
+            await self.update_session(session)
+            logger.info(f"Статус обновлен: user={user_id}, status={status.value}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления статуса: {e}")
+            return False
+    
+    async def get_all_sessions(self) -> Dict[int, UserSession]:
+        """
+        Получить все сессии (для админа)
+        
+        Returns:
+            Словарь всех сессий
+        """
+        return self.sessions.copy()
+    
+    async def cleanup_old_sessions(self, days: int = 7) -> int:
+        """
+        Очистить старые неактивные сессии
+        
+        Args:
+            days: Количество дней неактивности
+        
+        Returns:
+            Количество удаленных сессий
+        """
+        cutoff_date = datetime.now() - timedelta(days=days)
+        deleted = 0
+        
+        user_ids_to_delete = []
         
         for user_id, session in self.sessions.items():
-            if session.updated_at < cutoff_date:
-                user_ids_to_remove.append(user_id)
+            if session.updated_at < cutoff_date and session.status != SessionStatus.COMPLETED:
+                user_ids_to_delete.append(user_id)
         
-        for user_id in user_ids_to_remove:
-            del self.sessions[user_id]
-            removed_count += 1
+        for user_id in user_ids_to_delete:
+            await self.delete_session(user_id)
+            deleted += 1
         
-        if removed_count > 0:
-            logger.info(f"🗑️ Удалено {removed_count} старых сессий")
-            self._save_sessions_async()
+        if deleted > 0:
+            logger.info(f"Очищено {deleted} старых сессий")
         
-        return removed_count
+        return deleted
     
-    def get_statistics(self) -> BotStatistics:
-        """Получить статистику"""
-        # Обновляем количество активных сессий
-        active_count = sum(1 for s in self.sessions.values() 
-                          if not s.is_completed and 
-                          (datetime.now() - s.last_interaction).days < 1)
-        self.statistics.update_active_sessions(active_count)
+    async def get_session_statistics(self) -> Dict[str, any]:
+        """
+        Получить статистику по сессиям
         
-        return self.statistics
+        Returns:
+            Словарь со статистикой
+        """
+        total = len(self.sessions)
+        
+        statuses = {}
+        for session in self.sessions.values():
+            status = session.status.value
+            statuses[status] = statuses.get(status, 0) + 1
+        
+        completed = statuses.get(SessionStatus.COMPLETED.value, 0)
+        in_progress = statuses.get(SessionStatus.IN_PROGRESS.value, 0)
+        
+        avg_completion = 0
+        if self.sessions:
+            avg_completion = sum(
+                s.get_completion_percentage() for s in self.sessions.values()
+            ) / len(self.sessions)
+        
+        return {
+            'total_sessions': total,
+            'completed': completed,
+            'in_progress': in_progress,
+            'statuses': statuses,
+            'average_completion': round(avg_completion, 2)
+        }
     
-    def get_active_sessions_count(self) -> int:
-        """Получить количество активных сессий"""
-        active_count = sum(1 for s in self.sessions.values() 
-                          if not s.is_completed and 
-                          (datetime.now() - s.last_interaction).days < 1)
-        return active_count
-
-# Создаем глобальный экземпляр менеджера данных
-data_manager = DataManager()
-
-# Функция для быстрого доступа
-def get_data_manager() -> DataManager:
-    """Получить менеджер данных"""
-    return data_manager
+    def __len__(self) -> int:
+        """Количество активных сессий"""
+        return len(self.sessions)
+    
+    def __contains__(self, user_id: int) -> bool:
+        """Проверка наличия сессии"""
+        return user_id in self.sessions
