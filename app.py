@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-БИЗНЕС-НАВИГАТОР v7.0 - Главный файл запуска
+БИЗНЕС-НАВИГАТОР v7.0 - Главный файл запуска (FastAPI версия)
 """
 
 import asyncio
@@ -9,8 +9,11 @@ import os
 import sys
 import signal
 import logging
-import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 # Добавляем путь к модулям
 sys.path.insert(0, str(Path(__file__).parent))
@@ -22,232 +25,199 @@ try:
     setup_logging()
 except ImportError as e:
     print(f"❌ Не могу импортировать setup_logging: {e}")
-    print("Проверьте наличие utils/logger.py")
     sys.exit(1)
 
 logger = logging.getLogger(__name__)
 
-# Теперь импортируем остальное с обработкой ошибок
-try:
-    from config.settings import BotConfig
-    from core.bot import BusinessNavigatorBot
-except ImportError as e:
-    logger.error(f"❌ Ошибка импорта основных модулей: {e}")
-    logger.error("Проверьте наличие файлов:")
-    logger.error("  - config/settings.py")
-    logger.error("  - core/bot.py")
-    sys.exit(1)
-
-# Импорты с обработкой ошибок
-try:
-    from services.health_check import start_health_check_server
-    health_check_available = True
-except ImportError:
-    logger.warning("⚠️ Модуль health_check не найден, health сервер будет отключен")
-    health_check_available = False
-    start_health_check_server = None
-
-try:
-    from services.openai_service import OpenAIService
-    openai_available = True
-except ImportError:
-    logger.warning("⚠️ Модуль openai_service не найден, OpenAI функции будут отключены")
-    openai_available = False
-    OpenAIService = None
-
-try:
-    from services.data_manager import data_manager
-    data_manager_available = True
-except ImportError:
-    logger.warning("⚠️ Модуль data_manager не найден, создаю временный менеджер данных")
-    data_manager_available = False
-
-    # Создаем временный менеджер данных
-    from models.session import UserSession
-
-    class TempDataManager:
-        def __init__(self):
-            self.sessions = {}
-            logger.info("📝 Создан временный менеджер данных (данные не сохраняются)")
-
-        def initialize(self):
-            logger.info("🔄 Инициализация временного менеджера данных")
-
-        def get_session(self, user_id):
-            return self.sessions.get(user_id)
-
-        def create_session(self, user_id, username="", full_name=""):
-            session = UserSession(user_id=user_id, username=username, full_name=full_name)
-            self.sessions[user_id] = session
-            logger.info(f"📝 Создана временная сессия для пользователя {user_id}")
-            return session
-
-        def save_session(self, session):
-            self.sessions[session.user_id] = session
-            logger.debug(f"💾 Сессия пользователя {session.user_id} сохранена во временное хранилище")
-
-        def cleanup_old_sessions(self, days=7):
-            return 0
-
-        def get_statistics(self):
-            from models.session import BotStatistics
-            return BotStatistics()
-
-    data_manager = TempDataManager()
-
-# Глобальная переменная для graceful shutdown
+# Глобальные переменные
 bot_instance = None
+application = None
 
-def signal_handler(signum, frame):
-    """Обработчик сигналов для graceful shutdown"""
-    logger.info(f"📶 Получен сигнал {signum}, начинаю graceful shutdown...")
-    sys.exit(0)
-
-def run_health_check_server(host: str, port: int):
-    """Запуск health check сервера в отдельном потоке"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Управление жизненным циклом FastAPI приложения"""
+    global bot_instance, application
+    
+    # ===== ЗАПУСК ПРИ СТАРТЕ =====
+    logger.info("=" * 60)
+    logger.info("🚀 ЗАПУСК БИЗНЕС-НАВИГАТОРА v7.0 (FastAPI)")
+    logger.info("=" * 60)
+    
     try:
-        # Создаем новый event loop для этого потока
-        import asyncio as async_io
-        loop = async_io.new_event_loop()
-        async_io.set_event_loop(loop)
+        # Импорты с обработкой ошибок
+        from config.settings import BotConfig
+        from core.bot import BusinessNavigatorBot
         
-        # Запускаем сервер
-        loop.run_until_complete(start_health_check_server(host=host, port=port))
-    except Exception as e:
-        logger.error(f"❌ Ошибка health check сервера: {e}")
-
-async def main():
-    """Основная функция запуска бота"""
-    global bot_instance
-
-    try:
-        logger.info("=" * 60)
-        logger.info("🚀 ЗАПУСК БИЗНЕС-НАВИГАТОРА v7.0")
-        logger.info("=" * 60)
-
-        # Проверка Python версии
-        python_version = sys.version_info
-        logger.info(f"🐍 Python версия: {python_version.major}.{python_version.minor}.{python_version.micro}")
-
         # Загрузка конфигурации
         logger.info("⚙️ Загружаю конфигурацию...")
         config = BotConfig()
-
-        # Проверяем наличие обязательных переменных
+        
+        # Проверка обязательных переменных
         if not config.telegram_token:
-            logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА: TELEGRAM_BOT_TOKEN не найден!")
-            logger.error("Действия для исправления:")
-            logger.error("1. Получите токен у @BotFather в Telegram")
-            logger.error("2. Добавьте переменную в Render Dashboard:")
-            logger.error("   - Name: TELEGRAM_BOT_TOKEN")
-            logger.error("   - Value: ваш_токен_бота")
-            logger.error("3. Перезапустите деплой")
+            logger.error("❌ TELEGRAM_BOT_TOKEN не найден!")
             sys.exit(1)
-
+        
         # Маскируем токен для логов
         masked_token = config.telegram_token
         if len(masked_token) > 8:
             masked_token = masked_token[:4] + "***" + masked_token[-4:]
-
+        
         logger.info(f"✅ Токен бота: {masked_token}")
         logger.info(f"🤖 OpenAI модель: {config.openai_model}")
-        logger.info(f"🌐 Язык бота: {config.bot_language}")
         logger.info(f"📝 Вопросов загружено: {len(config.questions)}")
-        logger.info(f"🏢 Ниш загружено: {len(config.niche_categories)}")
-
-        # Инициализация менеджера данных
-        logger.info("💾 Инициализация менеджера данных...")
+        
+        # Инициализация менеджера данных (пока в памяти)
+        from services.data_manager import data_manager
         data_manager.initialize()
-
-        # Проверка OpenAI (если ключ есть и модуль доступен)
-        if config.openai_api_key and openai_available:
+        logger.info("💾 Менеджер данных инициализирован")
+        
+        # Проверка OpenAI
+        if config.openai_api_key:
             logger.info("🔍 Проверяем подключение к OpenAI...")
             try:
+                from services.openai_service import OpenAIService
                 openai_service = OpenAIService()
                 if openai_service.is_initialized:
                     logger.info("✅ OpenAI клиент инициализирован")
                 else:
                     logger.warning("⚠️ OpenAI клиент не инициализирован")
-                    logger.warning("Будет работать в базовом режиме")
             except Exception as e:
                 logger.warning(f"⚠️ Ошибка при проверке OpenAI: {e}")
-                logger.warning("Будет работать в базовом режиме")
-        elif not config.openai_api_key:
-            logger.warning("⚠️ OPENAI_API_KEY не найден. Будет работать базовый режим без AI.")
         else:
-            logger.warning("⚠️ Модуль OpenAI недоступен. Будет работать базовый режим.")
-
-        # ЗАПУСК HEALTH CHECK СЕРВЕРА В ОТДЕЛЬНОМ ПОТОКЕ
-        if health_check_available and start_health_check_server:
-            port = int(os.getenv('PORT', config.port))
-            logger.info(f"🌐 Запускаю health check сервер в отдельном потоке на порту {port}...")
-            
-            health_thread = threading.Thread(
-                target=run_health_check_server,
-                args=(config.host, port),
-                daemon=True  # Демонический поток - завершится с основным процессом
-            )
-            health_thread.start()
-            logger.info("✅ Health check сервер запущен в отдельном потоке")
-        else:
-            logger.info("⚠️ Health check сервер отключен")
-
+            logger.warning("⚠️ OPENAI_API_KEY не найден")
+        
         logger.info("-" * 40)
-
-        # Настраиваем обработку сигналов
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-
-        # Создание бота
+        
+        # Создание и запуск бота
         logger.info("🤖 Создаю экземпляр бота...")
         bot = BusinessNavigatorBot(config)
         bot_instance = bot
-
-        # Запуск бота
-        logger.info("▶️ Запускаю бота в режиме polling...")
-        logger.info("ℹ️ Для остановки нажмите Ctrl+C")
-
-        # ЗАПУСКАЕМ БОТА БЕЗ СОЗДАНИЯ ДОПОЛНИТЕЛЬНЫХ ЗАДАЧ
-        await bot.run()
-
-        logger.info("⏹ Бот остановлен")
-
-    except KeyboardInterrupt:
-        logger.info("⏹ Остановка бота по запросу пользователя (Ctrl+C)")
+        application = bot.application
+        
+        # ЗАПУСК БОТА В ФОНОВОМ РЕЖИМЕ
+        logger.info("▶️ Запускаю бота в фоновом режиме...")
+        
+        # Создаем задачу для бота
+        bot_task = asyncio.create_task(bot.start())
+        
+        # Ждем инициализации бота
+        await asyncio.sleep(2)
+        
+        logger.info("✅ Бот успешно запущен в фоновом режиме")
+        logger.info("🌐 FastAPI сервер готов принимать запросы")
+        
+        yield  # Здесь приложение работает
+        
     except Exception as e:
-        logger.critical(f"❌ Критическая ошибка: {e}", exc_info=True)
-        sys.exit(1)
+        logger.critical(f"❌ Ошибка при запуске: {e}", exc_info=True)
+        raise
+    
     finally:
-        logger.info("=" * 60)
+        # ===== ОСТАНОВКА ПРИ ЗАВЕРШЕНИИ =====
+        logger.info("⏹️ Останавливаю бота...")
+        if bot_instance:
+            try:
+                await bot_instance.stop()
+                logger.info("✅ Бот остановлен")
+            except Exception as e:
+                logger.error(f"❌ Ошибка при остановке бота: {e}")
+        
         logger.info("👋 Бизнес-Навигатор завершил работу")
         logger.info("=" * 60)
 
-def run_bot():
-    """Функция для запуска бота (используется Render)"""
-    # Проверяем, что мы на Render (есть переменная PORT)
-    port = os.getenv('PORT', '10000')
-    logger.info(f"🔧 Порт из окружения: {port}")
+# Создаем FastAPI приложение
+app = FastAPI(
+    title="Business Navigator API",
+    version="7.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
-    # Устанавливаем переменную PORT для конфига
-    os.environ['PORT'] = port
+# ===== ENDPOINTS =====
+@app.get("/")
+async def root():
+    """Корневой endpoint"""
+    return {
+        "app": "Business Navigator v7.0",
+        "status": "running",
+        "docs": "/docs"
+    }
 
-    # Настраиваем event loop для асинхронной работы
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+@app.get("/health")
+async def health_check():
+    """Health check для Render"""
+    global bot_instance
+    
+    if bot_instance and bot_instance.is_running:
+        return {"status": "healthy", "bot": "running"}
+    else:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "bot": "stopped"}
+        )
 
+@app.get("/status")
+async def status():
+    """Подробный статус системы"""
+    import psutil
+    import datetime
+    
+    return {
+        "status": "operational",
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "system": {
+            "cpu_percent": psutil.cpu_percent(),
+            "memory_percent": psutil.virtual_memory().percent,
+            "disk_percent": psutil.disk_usage('/').percent
+        },
+        "bot": {
+            "running": bot_instance.is_running if bot_instance else False,
+            "users_online": 0  # TODO: добавить подсчет
+        }
+    }
+
+@app.post("/restart-bot")
+async def restart_bot():
+    """Перезапуск бота (только для админов)"""
+    global bot_instance
+    
+    if not bot_instance:
+        raise HTTPException(status_code=500, detail="Bot not initialized")
+    
     try:
-        # Запускаем главную функцию
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("👋 Завершение работы по запросу пользователя")
-    except RuntimeError as e:
-        if "Event loop is closed" in str(e):
-            logger.info("🔄 Event loop закрыт, нормальное завершение")
-        else:
-            logger.error(f"❌ RuntimeError: {e}")
+        logger.info("🔄 Запрашивается перезапуск бота...")
+        await bot_instance.stop()
+        await asyncio.sleep(2)
+        await bot_instance.start()
+        logger.info("✅ Бот перезапущен")
+        return {"status": "success", "message": "Bot restarted"}
     except Exception as e:
-        logger.critical(f"❌ Неожиданная ошибка: {e}", exc_info=True)
-        sys.exit(1)
+        logger.error(f"❌ Ошибка при перезапуске бота: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-if __name__ == '__main__':
-    run_bot()
+# ===== ОБРАБОТЧИКИ СИГНАЛОВ =====
+def signal_handler(signum, frame):
+    """Обработчик сигналов для graceful shutdown"""
+    logger.info(f"📶 Получен сигнал {signum}, завершаю работу...")
+    sys.exit(0)
+
+# Регистрируем обработчики
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+# ===== ТОЧКА ВХОДА ДЛЯ RENDER =====
+if __name__ == "__main__":
+    import uvicorn
+    
+    port = int(os.getenv("PORT", 10000))
+    
+    logger.info(f"🔧 Запуск на порту {port}")
+    
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+        access_log=False
+    )
