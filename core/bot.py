@@ -8,6 +8,7 @@ import asyncio
 import logging
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
+from datetime import datetime
 
 from telegram.ext import (
     Application,
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 class BotStatus:
     """Статус работы бота"""
     is_running: bool = False
-    started_at: Optional[str] = None
+    started_at: Optional[float] = None
     total_users: int = 0
     active_sessions: int = 0
 
@@ -114,7 +115,7 @@ class BusinessNavigatorBot:
     async def _post_init(self, application: Application) -> None:
         """Вызывается после инициализации бота"""
         logger.info("🔄 Post-init выполнен")
-        self._status.started_at = asyncio.get_event_loop().time()
+        self._status.started_at = datetime.now().timestamp()
     
     async def _post_shutdown(self, application: Application) -> None:
         """Вызывается после завершения работы бота"""
@@ -166,10 +167,7 @@ class BusinessNavigatorBot:
             
             self._status.is_running = True
             self._status.total_users = len(data_manager.sessions)
-            self._status.active_sessions = sum(
-                1 for s in data_manager.sessions.values() 
-                if s.is_active
-            )
+            self._status.active_sessions = len(data_manager.sessions)
             
             logger.info("✅ Бот запущен в фоновом режиме")
             logger.info(f"📊 Пользователей в базе: {self._status.total_users}")
@@ -188,13 +186,16 @@ class BusinessNavigatorBot:
             await self.application.start()
             
             # Запускаем polling с параметрами
-            await self.application.run_polling(
+            await self.application.updater.start_polling(
                 poll_interval=0.5,
                 timeout=10,
                 drop_pending_updates=True,
-                close_loop=False,  # ВАЖНО: не закрываем event loop!
-                stop_signals=[]    # Не обрабатываем сигналы здесь
+                allowed_updates=["message", "callback_query"]
             )
+            
+            # Бесконечный цикл для поддержания работы
+            while self._status.is_running:
+                await asyncio.sleep(1)
             
         except asyncio.CancelledError:
             logger.info("⏹️ Polling отменен")
@@ -213,6 +214,9 @@ class BusinessNavigatorBot:
         try:
             logger.info("⏹️ Остановка бота...")
             
+            # Помечаем как неактивный
+            self._status.is_running = False
+            
             # Отменяем задачу polling
             if self._bot_task and not self._bot_task.done():
                 self._bot_task.cancel()
@@ -223,34 +227,17 @@ class BusinessNavigatorBot:
             
             # Останавливаем Application
             if self.application:
+                if self.application.updater and self.application.updater.running:
+                    await self.application.updater.stop()
                 await self.application.stop()
+                await self.application.shutdown()
                 logger.info("✅ Application остановлен")
             
-            self._status.is_running = False
             logger.info("✅ Бот полностью остановлен")
             
         except Exception as e:
             logger.error(f"❌ Ошибка при остановке бота: {e}")
             raise
-    
-    async def run(self) -> None:
-        """
-        Запуск бота (устаревший метод для совместимости)
-        Теперь бот запускается через start() и работает в фоне
-        """
-        logger.warning("⚠️ Используется устаревший метод run(), используйте start()")
-        await self.start()
-        
-        # Бесконечно ждем, пока бот работает
-        try:
-            while self._status.is_running:
-                await asyncio.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("👋 Получен сигнал KeyboardInterrupt")
-            await self.stop()
-        except asyncio.CancelledError:
-            logger.info("👋 Получен сигнал CancelledError")
-            await self.stop()
     
     def get_status(self) -> Dict[str, Any]:
         """Получение текущего статуса бота"""
@@ -260,7 +247,7 @@ class BusinessNavigatorBot:
             "total_users": self._status.total_users,
             "active_sessions": self._status.active_sessions,
             "config": {
-                "bot_name": self.config.bot_name,
+                "bot_name": "Business Navigator",
                 "bot_language": self.config.bot_language,
                 "questions_loaded": len(self.config.questions)
             }
