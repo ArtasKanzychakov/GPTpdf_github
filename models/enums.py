@@ -2,7 +2,7 @@
 Перечисления для Business Navigator
 """
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 
@@ -91,21 +91,28 @@ class NicheDetails:
     emoji: str = "💼"
     risk_level: int = 3  # 1-5
     time_to_profit: str = "3-6 месяцев"
-    required_skills: List[str] = None
+    required_skills: List[str] = field(default_factory=list)
     min_budget: int = 0
     success_rate: float = 0.5
-    examples: List[str] = None
+    examples: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         """Инициализация после создания"""
-        if self.required_skills is None:
-            self.required_skills = []
-        if self.examples is None:
-            self.examples = []
-        
         # Конвертируем category в enum если это строка
         if isinstance(self.category, str):
-            self.category = NicheCategory(self.category)
+            # Пытаемся найти по имени
+            for cat in NicheCategory:
+                if cat.name == self.category or cat.value == self.category:
+                    self.category = cat
+                    break
+            else:
+                # Если не нашли, пытаемся создать напрямую
+                try:
+                    self.category = NicheCategory(self.category)
+                except ValueError:
+                    # Если не получилось, ставим BALANCED по умолчанию
+                    print(f"⚠️ Неизвестная категория '{self.category}', использую BALANCED")
+                    self.category = NicheCategory.BALANCED
     
     @property
     def full_description(self) -> str:
@@ -128,20 +135,60 @@ class NicheDetails:
             text += f"\n🔧 Требуемые навыки:\n"
             for skill in self.required_skills[:3]:
                 text += f"• {skill}\n"
+            if len(self.required_skills) > 3:
+                text += f"• ... и ещё {len(self.required_skills) - 3}\n"
         
         if self.examples:
             text += f"\n💡 Примеры:\n"
             for example in self.examples[:2]:
                 text += f"• {example}\n"
+            if len(self.examples) > 2:
+                text += f"• ... и ещё {len(self.examples) - 2}\n"
         
         return text
     
-    def to_dict(self):
+    def short_description(self) -> str:
+        """Краткое описание для списка"""
+        return f"{self.emoji} {self.name} — {self.time_to_profit}"
+    
+    def matches_skills(self, user_skills: List[str], threshold: int = 1) -> bool:
+        """
+        Проверить соответствие навыкам пользователя
+        
+        Args:
+            user_skills: Навыки пользователя
+            threshold: Минимальное количество совпадений
+        
+        Returns:
+            True если хватает совпадений
+        """
+        if not self.required_skills:
+            return True
+        
+        matches = len(set(self.required_skills) & set(user_skills))
+        return matches >= threshold
+    
+    def matches_risk_tolerance(self, user_risk: int, tolerance: int = 2) -> bool:
+        """
+        Проверить соответствие толерантности к риску
+        
+        Args:
+            user_risk: Уровень риска пользователя (1-10)
+            tolerance: Допустимое отклонение
+        
+        Returns:
+            True если подходит
+        """
+        # Нормализуем user_risk (1-10) к risk_level (1-5)
+        normalized_user_risk = int(user_risk / 2)
+        return abs(self.risk_level - normalized_user_risk) <= tolerance
+    
+    def to_dict(self) -> dict:
         """Конвертация в словарь"""
         return {
             "id": self.id,
             "name": self.name,
-            "category": self.category.value,
+            "category": self.category.value if isinstance(self.category, NicheCategory) else self.category,
             "description": self.description,
             "emoji": self.emoji,
             "risk_level": self.risk_level,
@@ -153,7 +200,7 @@ class NicheDetails:
         }
     
     @classmethod
-    def from_dict(cls, data: dict):
+    def from_dict(cls, data: dict) -> "NicheDetails":
         """Создание из словаря"""
         return cls(
             id=data.get("id", ""),
@@ -168,3 +215,11 @@ class NicheDetails:
             success_rate=data.get("success_rate", 0.5),
             examples=data.get("examples", [])
         )
+    
+    def __str__(self) -> str:
+        """Строковое представление"""
+        return f"{self.emoji} {self.name} ({self.category.value})"
+    
+    def __repr__(self) -> str:
+        """Представление для отладки"""
+        return f"NicheDetails(id='{self.id}', name='{self.name}', category={self.category})"
