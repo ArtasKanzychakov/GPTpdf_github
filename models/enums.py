@@ -2,6 +2,8 @@
 Перечисления для Business Navigator
 """
 from enum import Enum
+from dataclasses import dataclass
+from typing import List, Optional
 
 
 class ConversationState(Enum):
@@ -77,3 +79,92 @@ class UserRole(Enum):
     USER = "user"
     PREMIUM = "premium"
     ADMIN = "admin"
+
+
+@dataclass
+class NicheDetails:
+    """Детальная информация о бизнес-нише"""
+    id: str
+    name: str
+    category: NicheCategory
+    description: str
+    emoji: str = "💼"
+    risk_level: int = 3  # 1-5
+    time_to_profit: str = "3-6 месяцев"
+    required_skills: List[str] = None
+    min_budget: int = 0
+    success_rate: float = 0.5
+    examples: List[str] = None
+    
+    def __post_init__(self):
+        """Инициализация после создания"""
+        if self.required_skills is None:
+            self.required_skills = []
+        if self.examples is None:
+            self.examples = []
+        
+        # Конвертируем category в enum если это строка
+        if isinstance(self.category, str):
+            self.category = NicheCategory(self.category)
+    
+    @property
+    def full_description(self) -> str:
+        """Полное описание ниши"""
+        risk_stars = "★" * self.risk_level + "☆" * (5 - self.risk_level)
+        
+        text = f"{self.emoji} *{self.name}*\n"
+        text += f"📊 Категория: {self.category.value}\n"
+        text += f"📝 {self.description}\n\n"
+        text += f"⏱️ Срок выхода на прибыль: {self.time_to_profit}\n"
+        text += f"🎯 Уровень риска: {risk_stars} ({self.risk_level}/5)\n"
+        
+        if self.min_budget > 0:
+            text += f"💰 Мин. бюджет: {self.min_budget:,.0f} руб\n"
+        
+        if self.success_rate > 0:
+            text += f"📈 Шанс успеха: {self.success_rate*100:.0f}%\n"
+        
+        if self.required_skills:
+            text += f"\n🔧 Требуемые навыки:\n"
+            for skill in self.required_skills[:3]:
+                text += f"• {skill}\n"
+        
+        if self.examples:
+            text += f"\n💡 Примеры:\n"
+            for example in self.examples[:2]:
+                text += f"• {example}\n"
+        
+        return text
+    
+    def to_dict(self):
+        """Конвертация в словарь"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category.value,
+            "description": self.description,
+            "emoji": self.emoji,
+            "risk_level": self.risk_level,
+            "time_to_profit": self.time_to_profit,
+            "required_skills": self.required_skills,
+            "min_budget": self.min_budget,
+            "success_rate": self.success_rate,
+            "examples": self.examples
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Создание из словаря"""
+        return cls(
+            id=data.get("id", ""),
+            name=data.get("name", ""),
+            category=data.get("category", "balanced"),
+            description=data.get("description", ""),
+            emoji=data.get("emoji", "💼"),
+            risk_level=data.get("risk_level", 3),
+            time_to_profit=data.get("time_to_profit", "3-6 месяцев"),
+            required_skills=data.get("required_skills", []),
+            min_budget=data.get("min_budget", 0),
+            success_rate=data.get("success_rate", 0.5),
+            examples=data.get("examples", [])
+        )
