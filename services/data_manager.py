@@ -5,7 +5,7 @@ import logging
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
-from models.session import UserSession, SessionStatus, DemographicData
+from models.session import UserSession, SessionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +17,18 @@ class DataManager:
         """Инициализация менеджера данных"""
         # Временное хранилище в памяти (до интеграции PostgreSQL)
         self.sessions: Dict[int, UserSession] = {}
-        logger.info("DataManager инициализирован (in-memory storage)")
+        self._initialized = False
+        logger.info("DataManager создан")
     
-    async def get_session(self, user_id: int) -> Optional[UserSession]:
+    def initialize(self):
+        """Инициализация менеджера (вызывается при старте)"""
+        if not self._initialized:
+            self._initialized = True
+            logger.info("✅ DataManager инициализирован (in-memory storage)")
+    
+    def get_session(self, user_id: int) -> Optional[UserSession]:
         """
-        Получить сессию пользователя
+        Получить сессию пользователя (синхронный метод)
         
         Args:
             user_id: ID пользователя в Telegram
@@ -38,12 +45,13 @@ class DataManager:
         
         return session
     
-    async def create_session(self, user_id: int) -> UserSession:
+    def create_session(self, user_id: int, **kwargs) -> UserSession:
         """
-        Создать новую сессию
+        Создать новую сессию (синхронный метод)
         
         Args:
             user_id: ID пользователя в Telegram
+            **kwargs: Дополнительные параметры
         
         Returns:
             Новая UserSession
@@ -52,7 +60,8 @@ class DataManager:
             user_id=user_id,
             status=SessionStatus.STARTED,
             current_question=1,
-            current_category="demographic"
+            current_category="demographic",
+            **kwargs
         )
         
         self.sessions[user_id] = session
@@ -60,9 +69,9 @@ class DataManager:
         
         return session
     
-    async def update_session(self, session: UserSession) -> bool:
+    def save_session(self, session: UserSession) -> bool:
         """
-        Обновить существующую сессию
+        Сохранить сессию (синхронный метод)
         
         Args:
             session: Объект сессии
@@ -73,15 +82,22 @@ class DataManager:
         try:
             session.update_timestamp()
             self.sessions[session.user_id] = session
-            logger.debug(f"Сессия обновлена для пользователя {session.user_id}")
+            logger.debug(f"Сессия сохранена для пользователя {session.user_id}")
             return True
         except Exception as e:
-            logger.error(f"Ошибка обновления сессии: {e}")
+            logger.error(f"Ошибка сохранения сессии: {e}")
             return False
     
-    async def delete_session(self, user_id: int) -> bool:
+    def update_session(self, session: UserSession) -> bool:
         """
-        Удалить сессию
+        Обновить существующую сессию (синхронный метод)
+        Алиас для save_session для совместимости
+        """
+        return self.save_session(session)
+    
+    def delete_session(self, user_id: int) -> bool:
+        """
+        Удалить сессию (синхронный метод)
         
         Args:
             user_id: ID пользователя
@@ -99,7 +115,7 @@ class DataManager:
             logger.error(f"Ошибка удаления сессии: {e}")
             return False
     
-    async def save_answer(
+    def save_answer(
         self, 
         user_id: int, 
         question_id: str, 
@@ -116,7 +132,7 @@ class DataManager:
         Returns:
             True если успешно
         """
-        session = await self.get_session(user_id)
+        session = self.get_session(user_id)
         
         if not session:
             logger.warning(f"Попытка сохранить ответ для несуществующей сессии: {user_id}")
@@ -124,14 +140,14 @@ class DataManager:
         
         try:
             session.add_answer(question_id, answer)
-            await self.update_session(session)
+            self.save_session(session)
             logger.info(f"Ответ сохранен: user={user_id}, question={question_id}")
             return True
         except Exception as e:
             logger.error(f"Ошибка сохранения ответа: {e}")
             return False
     
-    async def update_temp_data(
+    def update_temp_data(
         self, 
         user_id: int, 
         key: str, 
@@ -148,20 +164,20 @@ class DataManager:
         Returns:
             True если успешно
         """
-        session = await self.get_session(user_id)
+        session = self.get_session(user_id)
         
         if not session:
             return False
         
         try:
             session.temp_data[key] = value
-            await self.update_session(session)
+            self.save_session(session)
             return True
         except Exception as e:
             logger.error(f"Ошибка обновления temp_data: {e}")
             return False
     
-    async def clear_temp_data(self, user_id: int) -> bool:
+    def clear_temp_data(self, user_id: int) -> bool:
         """
         Очистить временные данные
         
@@ -171,20 +187,20 @@ class DataManager:
         Returns:
             True если успешно
         """
-        session = await self.get_session(user_id)
+        session = self.get_session(user_id)
         
         if not session:
             return False
         
         try:
             session.temp_data = {}
-            await self.update_session(session)
+            self.save_session(session)
             return True
         except Exception as e:
             logger.error(f"Ошибка очистки temp_data: {e}")
             return False
     
-    async def update_status(
+    def update_status(
         self, 
         user_id: int, 
         status: SessionStatus
@@ -199,7 +215,7 @@ class DataManager:
         Returns:
             True если успешно
         """
-        session = await self.get_session(user_id)
+        session = self.get_session(user_id)
         
         if not session:
             return False
@@ -210,14 +226,14 @@ class DataManager:
             if status == SessionStatus.COMPLETED:
                 session.completed_at = datetime.now()
             
-            await self.update_session(session)
+            self.save_session(session)
             logger.info(f"Статус обновлен: user={user_id}, status={status.value}")
             return True
         except Exception as e:
             logger.error(f"Ошибка обновления статуса: {e}")
             return False
     
-    async def get_all_sessions(self) -> Dict[int, UserSession]:
+    def get_all_sessions(self) -> Dict[int, UserSession]:
         """
         Получить все сессии (для админа)
         
@@ -226,7 +242,7 @@ class DataManager:
         """
         return self.sessions.copy()
     
-    async def cleanup_old_sessions(self, days: int = 7) -> int:
+    def cleanup_old_sessions(self, days: int = 7) -> int:
         """
         Очистить старые неактивные сессии
         
@@ -246,7 +262,7 @@ class DataManager:
                 user_ids_to_delete.append(user_id)
         
         for user_id in user_ids_to_delete:
-            await self.delete_session(user_id)
+            self.delete_session(user_id)
             deleted += 1
         
         if deleted > 0:
@@ -254,7 +270,7 @@ class DataManager:
         
         return deleted
     
-    async def get_session_statistics(self) -> Dict[str, any]:
+    def get_session_statistics(self) -> Dict[str, any]:
         """
         Получить статистику по сессиям
         
@@ -292,3 +308,7 @@ class DataManager:
     def __contains__(self, user_id: int) -> bool:
         """Проверка наличия сессии"""
         return user_id in self.sessions
+
+
+# Глобальный экземпляр (создается но НЕ инициализируется)
+data_manager = DataManager()
