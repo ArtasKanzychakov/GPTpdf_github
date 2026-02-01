@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 БИЗНЕС-НАВИГАТОР v7.0 - Главный файл запуска (FastAPI версия)
+С ДВОЙНОЙ СИСТЕМОЙ ПРОБУЖДЕНИЯ для Render.com
 """
 
 import asyncio
@@ -11,9 +12,11 @@ import signal
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from datetime import datetime
+import aiohttp
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 # Добавляем путь к модулям
 sys.path.insert(0, str(Path(__file__).parent))
@@ -21,22 +24,59 @@ sys.path.insert(0, str(Path(__file__).parent))
 # Сначала импортируем только setup_logging
 try:
     from utils.logger import setup_logging
-    # Настраиваем логирование сразу
     setup_logging()
 except ImportError as e:
     print(f"❌ Не могу импортировать setup_logging: {e}")
-    sys.exit(1)
+    logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
 # Глобальные переменные
 bot_instance = None
 application = None
+keep_alive_task = None
 
+# ============================================
+# СИСТЕМА ПРОБУЖДЕНИЯ #1: Self-Ping
+# ============================================
+async def self_ping_task():
+    """
+    Система пробуждения #1: Пингуем сами себя каждые 10 минут
+    """
+    await asyncio.sleep(60)  # Даем время на запуск
+    
+    app_url = os.getenv("RENDER_EXTERNAL_URL")
+    if not app_url:
+        logger.warning("⚠️ RENDER_EXTERNAL_URL не установлен, self-ping отключен")
+        return
+    
+    logger.info(f"🔔 Self-ping активирован для {app_url}")
+    
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                await asyncio.sleep(600)  # 10 минут
+                
+                async with session.get(f"{app_url}/health", timeout=10) as response:
+                    if response.status == 200:
+                        logger.info("✅ Self-ping успешен")
+                    else:
+                        logger.warning(f"⚠️ Self-ping вернул {response.status}")
+                        
+            except asyncio.CancelledError:
+                logger.info("🛑 Self-ping остановлен")
+                break
+            except Exception as e:
+                logger.error(f"❌ Ошибка self-ping: {e}")
+                await asyncio.sleep(60)  # Короткая пауза перед повтором
+
+# ============================================
+# СИСТЕМА ПРОБУЖДЕНИЯ #2: UptimeRobot webhook
+# ============================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом FastAPI приложения"""
-    global bot_instance, application
+    global bot_instance, application, keep_alive_task
     
     # ===== ЗАПУСК ПРИ СТАРТЕ =====
     logger.info("=" * 60)
@@ -66,9 +106,10 @@ async def lifespan(app: FastAPI):
         logger.info(f"🤖 OpenAI модель: {config.openai_model}")
         logger.info(f"📝 Вопросов загружено: {len(config.questions)}")
         
-        # Инициализация менеджера данных (пока в памяти)
-        from services.data_manager import data_manager
-        data_manager.initialize()
+        # Инициализация менеджера данных
+        from services.data_manager import DataManager
+        global data_manager
+        data_manager = DataManager()
         logger.info("💾 Менеджер данных инициализирован")
         
         # Проверка OpenAI
@@ -96,14 +137,17 @@ async def lifespan(app: FastAPI):
         
         # ЗАПУСК БОТА В ФОНОВОМ РЕЖИМЕ
         logger.info("▶️ Запускаю бота в фоновом режиме...")
-        
-        # Создаем задачу для бота
         bot_task = asyncio.create_task(bot.start())
         
         # Ждем инициализации бота
         await asyncio.sleep(2)
         
+        # ЗАПУСК СИСТЕМЫ ПРОБУЖДЕНИЯ #1
+        logger.info("🔔 Запускаю систему самопробуждения...")
+        keep_alive_task = asyncio.create_task(self_ping_task())
+        
         logger.info("✅ Бот успешно запущен в фоновом режиме")
+        logger.info("✅ Система пробуждения активирована")
         logger.info("🌐 FastAPI сервер готов принимать запросы")
         
         yield  # Здесь приложение работает
@@ -114,7 +158,17 @@ async def lifespan(app: FastAPI):
     
     finally:
         # ===== ОСТАНОВКА ПРИ ЗАВЕРШЕНИИ =====
-        logger.info("⏹️ Останавливаю бота...")
+        logger.info("⏹️ Останавливаю систему...")
+        
+        # Останавливаем self-ping
+        if keep_alive_task and not keep_alive_task.done():
+            keep_alive_task.cancel()
+            try:
+                await keep_alive_task
+            except asyncio.CancelledError:
+                logger.info("✅ Self-ping остановлен")
+        
+        # Останавливаем бота
         if bot_instance:
             try:
                 await bot_instance.stop()
@@ -141,41 +195,71 @@ async def root():
     return {
         "app": "Business Navigator v7.0",
         "status": "running",
+        "timestamp": datetime.utcnow().isoformat(),
         "docs": "/docs"
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check для Render"""
+    """
+    Health check для Render и UptimeRobot
+    СИСТЕМА ПРОБУЖДЕНИЯ #2: Этот endpoint пингуется извне
+    """
     global bot_instance
     
     if bot_instance and bot_instance.is_running:
-        return {"status": "healthy", "bot": "running"}
+        return {
+            "status": "healthy",
+            "bot": "running",
+            "timestamp": datetime.utcnow().isoformat()
+        }
     else:
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "bot": "stopped"}
+            content={
+                "status": "unhealthy",
+                "bot": "stopped",
+                "timestamp": datetime.utcnow().isoformat()
+            }
         )
+
+@app.get("/ping")
+async def ping():
+    """
+    Простой пинг (для UptimeRobot и других мониторингов)
+    """
+    return PlainTextResponse("pong")
 
 @app.get("/status")
 async def status():
     """Подробный статус системы"""
-    import psutil
-    import datetime
-    
-    return {
-        "status": "operational",
-        "timestamp": datetime.datetime.utcnow().isoformat(),
-        "system": {
-            "cpu_percent": psutil.cpu_percent(),
-            "memory_percent": psutil.virtual_memory().percent,
-            "disk_percent": psutil.disk_usage('/').percent
-        },
-        "bot": {
-            "running": bot_instance.is_running if bot_instance else False,
-            "users_online": 0  # TODO: добавить подсчет
+    try:
+        import psutil
+        
+        return {
+            "status": "operational",
+            "timestamp": datetime.utcnow().isoformat(),
+            "system": {
+                "cpu_percent": psutil.cpu_percent(),
+                "memory_percent": psutil.virtual_memory().percent,
+                "disk_percent": psutil.disk_usage('/').percent
+            },
+            "bot": {
+                "running": bot_instance.is_running if bot_instance else False,
+                "users_count": len(data_manager.sessions) if 'data_manager' in globals() else 0
+            },
+            "keep_alive": {
+                "self_ping_active": keep_alive_task is not None and not keep_alive_task.done(),
+                "external_url": os.getenv("RENDER_EXTERNAL_URL", "not_set")
+            }
         }
-    }
+    except Exception as e:
+        logger.error(f"Ошибка в /status: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 @app.post("/restart-bot")
 async def restart_bot():
@@ -195,6 +279,27 @@ async def restart_bot():
     except Exception as e:
         logger.error(f"❌ Ошибка при перезапуске бота: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/wake-up")
+async def wake_up():
+    """
+    Эндпоинт для принудительного пробуждения
+    Можно вызывать из cron-job.org или подобных сервисов
+    """
+    logger.info("🔔 Получен запрос на пробуждение")
+    
+    if bot_instance and bot_instance.is_running:
+        return {
+            "status": "already_awake",
+            "message": "Bot is already running",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    else:
+        return {
+            "status": "waking_up",
+            "message": "Bot starting...",
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 # ===== ОБРАБОТЧИКИ СИГНАЛОВ =====
 def signal_handler(signum, frame):
