@@ -56,6 +56,10 @@ class ConversationState(Enum):
     FEEDBACK = "feedback"
 
 
+# АЛИАС для обратной совместимости
+BotState = ConversationState
+
+
 class PaymentStatus(Enum):
     """Статусы оплаты"""
     PENDING = "pending"
