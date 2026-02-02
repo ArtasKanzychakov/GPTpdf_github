@@ -285,7 +285,8 @@ def format_slider_display(value: int, min_val: int, max_val: int) -> str:
     
     bar = "[" + "█" * position + "○" + "░" * (bar_length - position - 1) + "]"
     return f"{bar} {value}/{max_val}"
-    def format_niche(niche, detailed: bool = False) -> str:
+
+def format_niche(niche, detailed: bool = False) -> str:
     """
     Форматирование информации о нише
     Алиас для format_niche_details для обратной совместимости
@@ -414,4 +415,44 @@ def format_error_message(error_type: str, details: str = None) -> str:
         'session_not_found': '❌ Сессия не найдена. Используйте /start для начала.',
         'invalid_answer': '❌ Неверный формат ответа. Попробуйте ещё раз.',
         'openai_error': '❌ Ошибка генерации AI. Попробуйте позже.',
-        'payment_error': '❌ Ошибка
+        'payment_error': '❌ Ошибка платежной системы.',
+        'network_error': '❌ Ошибка сети. Проверьте подключение.',
+        'unknown': '❌ Произошла неизвестная ошибка.'
+    }
+    
+    message = messages.get(error_type, messages['unknown'])
+    
+    if details:
+        message += f"\n\n💡 Детали: {details}"
+    
+    message += "\n\nℹ️ Если проблема повторяется, используйте /help"
+    
+    return message
+
+
+def format_success_message(message_type: str, details: str = None) -> str:
+    """
+    Форматирование успешных сообщений
+    
+    Args:
+        message_type: Тип сообщения
+        details: Дополнительные детали
+    
+    Returns:
+        Форматированное сообщение
+    """
+    messages = {
+        'answer_saved': '✅ Ответ сохранён!',
+        'profile_updated': '✅ Профиль обновлён!',
+        'analysis_ready': '🎉 Анализ готов!',
+        'plan_ready': '🎉 План готов!',
+        'payment_success': '✅ Оплата прошла успешно!',
+        'questionnaire_complete': '🎊 Анкета заполнена!'
+    }
+    
+    message = messages.get(message_type, '✅ Успешно!')
+    
+    if details:
+        message += f"\n\n{details}"
+    
+    return message
