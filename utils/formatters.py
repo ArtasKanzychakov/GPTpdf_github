@@ -354,7 +354,7 @@ def format_plan(plan_text: str, niche_name: str = None) -> str:
 
     # Добавляем заголовок
     if niche_name:
-        header = f"📋 *90-дневный план для ниши "{niche_name}"*\n\n"
+        header = f"📋 *90-дневный план для ниши «{niche_name}»*\n\n"
     else:
         header = "📋 *Ваш персональный 90-дневный план*\n\n"
     
