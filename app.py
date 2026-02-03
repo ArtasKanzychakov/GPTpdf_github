@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-БИЗНЕС-НАВИГАТОР v7.0 - Главный файл запуска (FastAPI версия)
-С ДВОЙНОЙ СИСТЕМОЙ ПРОБУЖДЕНИЯ для Render.com
+БИЗНЕС-НАВИГАТОР v7.1 - Главный файл запуска (Оптимизированная версия)
+FastAPI + Self-Ping система пробуждения для Render.com
 """
 
 import asyncio
@@ -15,13 +15,13 @@ from pathlib import Path
 from datetime import datetime
 import aiohttp
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 # Добавляем путь к модулям
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Сначала импортируем только setup_logging
+# Настройка логирования
 try:
     from utils.logger import setup_logging
     setup_logging()
@@ -37,12 +37,10 @@ application = None
 keep_alive_task = None
 
 # ============================================
-# СИСТЕМА ПРОБУЖДЕНИЯ #1: Self-Ping
+# СИСТЕМА ПРОБУЖДЕНИЯ: Self-Ping
 # ============================================
 async def self_ping_task():
-    """
-    Система пробуждения #1: Пингуем сами себя каждые 10 минут
-    """
+    """Пингуем сами себя каждые 10 минут для предотвращения засыпания"""
     await asyncio.sleep(60)  # Даем время на запуск
     
     app_url = os.getenv("RENDER_EXTERNAL_URL")
@@ -68,46 +66,41 @@ async def self_ping_task():
                 break
             except Exception as e:
                 logger.error(f"❌ Ошибка self-ping: {e}")
-                await asyncio.sleep(60)  # Короткая пауза перед повтором
+                await asyncio.sleep(60)
 
 # ============================================
-# СИСТЕМА ПРОБУЖДЕНИЯ #2: UptimeRobot webhook
+# LIFECYCLE MANAGEMENT
 # ============================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом FastAPI приложения"""
     global bot_instance, application, keep_alive_task
     
-    # ===== ЗАПУСК ПРИ СТАРТЕ =====
+    # ===== ЗАПУСК =====
     logger.info("=" * 60)
-    logger.info("🚀 ЗАПУСК БИЗНЕС-НАВИГАТОРА v7.0 (FastAPI)")
+    logger.info("🚀 ЗАПУСК БИЗНЕС-НАВИГАТОРА v7.1 (Оптимизированная версия)")
     logger.info("=" * 60)
     
     try:
-        # Импорты с обработкой ошибок
         from config.settings import BotConfig
         from core.bot import BusinessNavigatorBot
+        from services.data_manager import DataManager
         
         # Загрузка конфигурации
         logger.info("⚙️ Загружаю конфигурацию...")
         config = BotConfig()
         
-        # Проверка обязательных переменных
         if not config.telegram_token:
             logger.error("❌ TELEGRAM_BOT_TOKEN не найден!")
             sys.exit(1)
         
-        # Маскируем токен для логов
-        masked_token = config.telegram_token
-        if len(masked_token) > 8:
-            masked_token = masked_token[:4] + "***" + masked_token[-4:]
-        
+        # Маскируем токен
+        masked_token = config.telegram_token[:4] + "***" + config.telegram_token[-4:] if len(config.telegram_token) > 8 else "***"
         logger.info(f"✅ Токен бота: {masked_token}")
         logger.info(f"🤖 OpenAI модель: {config.openai_model}")
         logger.info(f"📝 Вопросов загружено: {len(config.questions)}")
         
         # Инициализация менеджера данных
-        from services.data_manager import DataManager
         global data_manager
         data_manager = DataManager()
         logger.info("💾 Менеджер данных инициализирован")
@@ -135,29 +128,27 @@ async def lifespan(app: FastAPI):
         bot_instance = bot
         application = bot.application
         
-        # ЗАПУСК БОТА В ФОНОВОМ РЕЖИМЕ
-        logger.info("▶️ Запускаю бота в фоновом режиме...")
+        # Запуск бота в фоновом режиме
+        logger.info("▶️ Запускаю бота...")
         bot_task = asyncio.create_task(bot.start())
-        
-        # Ждем инициализации бота
         await asyncio.sleep(2)
         
-        # ЗАПУСК СИСТЕМЫ ПРОБУЖДЕНИЯ #1
+        # Запуск системы пробуждения
         logger.info("🔔 Запускаю систему самопробуждения...")
         keep_alive_task = asyncio.create_task(self_ping_task())
         
-        logger.info("✅ Бот успешно запущен в фоновом режиме")
+        logger.info("✅ Бот успешно запущен")
         logger.info("✅ Система пробуждения активирована")
-        logger.info("🌐 FastAPI сервер готов принимать запросы")
+        logger.info("🌐 FastAPI сервер готов")
         
-        yield  # Здесь приложение работает
+        yield  # Работа приложения
         
     except Exception as e:
         logger.critical(f"❌ Ошибка при запуске: {e}", exc_info=True)
         raise
     
     finally:
-        # ===== ОСТАНОВКА ПРИ ЗАВЕРШЕНИИ =====
+        # ===== ОСТАНОВКА =====
         logger.info("⏹️ Останавливаю систему...")
         
         # Останавливаем self-ping
@@ -174,15 +165,17 @@ async def lifespan(app: FastAPI):
                 await bot_instance.stop()
                 logger.info("✅ Бот остановлен")
             except Exception as e:
-                logger.error(f"❌ Ошибка при остановке бота: {e}")
+                logger.error(f"❌ Ошибка при остановке: {e}")
         
-        logger.info("👋 Бизнес-Навигатор завершил работу")
+        logger.info("👋 Завершение работы")
         logger.info("=" * 60)
 
-# Создаем FastAPI приложение
+# ============================================
+# FASTAPI APPLICATION
+# ============================================
 app = FastAPI(
     title="Business Navigator API",
-    version="7.0",
+    version="7.1",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
@@ -193,7 +186,7 @@ app = FastAPI(
 async def root():
     """Корневой endpoint"""
     return {
-        "app": "Business Navigator v7.0",
+        "app": "Business Navigator v7.1 (Optimized)",
         "status": "running",
         "timestamp": datetime.utcnow().isoformat(),
         "docs": "/docs"
@@ -201,10 +194,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """
-    Health check для Render и UptimeRobot
-    СИСТЕМА ПРОБУЖДЕНИЯ #2: Этот endpoint пингуется извне
-    """
+    """Health check для Render и мониторинга"""
     global bot_instance
     
     if bot_instance and bot_instance.is_running:
@@ -225,98 +215,23 @@ async def health_check():
 
 @app.get("/ping")
 async def ping():
-    """
-    Простой пинг (для UptimeRobot и других мониторингов)
-    """
+    """Простой пинг для UptimeRobot"""
     return PlainTextResponse("pong")
-
-@app.get("/status")
-async def status():
-    """Подробный статус системы"""
-    try:
-        import psutil
-        
-        return {
-            "status": "operational",
-            "timestamp": datetime.utcnow().isoformat(),
-            "system": {
-                "cpu_percent": psutil.cpu_percent(),
-                "memory_percent": psutil.virtual_memory().percent,
-                "disk_percent": psutil.disk_usage('/').percent
-            },
-            "bot": {
-                "running": bot_instance.is_running if bot_instance else False,
-                "users_count": len(data_manager.sessions) if 'data_manager' in globals() else 0
-            },
-            "keep_alive": {
-                "self_ping_active": keep_alive_task is not None and not keep_alive_task.done(),
-                "external_url": os.getenv("RENDER_EXTERNAL_URL", "not_set")
-            }
-        }
-    except Exception as e:
-        logger.error(f"Ошибка в /status: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-@app.post("/restart-bot")
-async def restart_bot():
-    """Перезапуск бота (только для админов)"""
-    global bot_instance
-    
-    if not bot_instance:
-        raise HTTPException(status_code=500, detail="Bot not initialized")
-    
-    try:
-        logger.info("🔄 Запрашивается перезапуск бота...")
-        await bot_instance.stop()
-        await asyncio.sleep(2)
-        await bot_instance.start()
-        logger.info("✅ Бот перезапущен")
-        return {"status": "success", "message": "Bot restarted"}
-    except Exception as e:
-        logger.error(f"❌ Ошибка при перезапуске бота: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/wake-up")
-async def wake_up():
-    """
-    Эндпоинт для принудительного пробуждения
-    Можно вызывать из cron-job.org или подобных сервисов
-    """
-    logger.info("🔔 Получен запрос на пробуждение")
-    
-    if bot_instance and bot_instance.is_running:
-        return {
-            "status": "already_awake",
-            "message": "Bot is already running",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    else:
-        return {
-            "status": "waking_up",
-            "message": "Bot starting...",
-            "timestamp": datetime.utcnow().isoformat()
-        }
 
 # ===== ОБРАБОТЧИКИ СИГНАЛОВ =====
 def signal_handler(signum, frame):
-    """Обработчик сигналов для graceful shutdown"""
+    """Graceful shutdown"""
     logger.info(f"📶 Получен сигнал {signum}, завершаю работу...")
     sys.exit(0)
 
-# Регистрируем обработчики
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-# ===== ТОЧКА ВХОДА ДЛЯ RENDER =====
+# ===== ТОЧКА ВХОДА =====
 if __name__ == "__main__":
     import uvicorn
     
     port = int(os.getenv("PORT", 10000))
-    
     logger.info(f"🔧 Запуск на порту {port}")
     
     uvicorn.run(
