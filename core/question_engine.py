@@ -1,281 +1,639 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Движок вопросов для бизнес-навигатора
-"""
 
-import logging
+"""
+Движок вопросов v2.0 для Business Navigator
+Поддержка всех типов интерактивных вопросов
+"""
+import yaml
 from typing import Dict, Any, Optional, List, Tuple
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes
+from pathlib import Path
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+import logging
 
-from models.enums import BotState, QuestionType
+from models.question_types import QuestionType, QuestionCategory
 from models.session import UserSession
-from config.settings import config
-from utils.formatters import format_question_text
 
 logger = logging.getLogger(__name__)
 
-class QuestionEngine:
-    """Движок для управления вопросами анкеты"""
+
+class QuestionEngineV2:
+    """Движок обработки вопросов анкеты v2.0"""
     
-    def __init__(self):
-        self.total_questions = len(config.questions)
-        logger.info(f"QuestionEngine инициализирован с {self.total_questions} вопросами")
-    
-    def get_question_by_index(self, index: int) -> Optional[Dict[str, Any]]:
-        """Получить вопрос по индексу"""
-        if 0 <= index < self.total_questions:
-            question = config.questions[index]
-            
-            # Добавляем метаданные для отладки
-            question['question_number'] = index + 1
-            question['total_questions'] = self.total_questions
-            
-            return question
-        return None
-    
-    def get_next_question_index(self, current_index: int) -> Optional[int]:
-        """Получить индекс следующего вопроса"""
-        if current_index < self.total_questions - 1:
-            return current_index + 1
-        return None
-    
-    def get_question_text(self, question: Dict[str, Any], session: UserSession) -> str:
-        """Форматировать текст вопроса"""
-        text = question.get('text', '')
+    def __init__(self, questions_file: str = "config/questions_v2.yaml"):
+        """
+        Инициализация движка
         
-        # Добавляем номер вопроса
-        q_num = question.get('question_number', 0)
-        total = question.get('total_questions', self.total_questions)
+        Args:
+            questions_file: Путь к YAML файлу с вопросами
+        """
+        self.questions_file = Path(questions_file)
+        self.questions: Dict[str, Any] = {}
+        self.load_questions()
+    
+    def load_questions(self):
+        """Загрузить вопросы из YAML файла"""
+        try:
+            with open(self.questions_file, 'r', encoding='utf-8') as f:
+                self.questions = yaml.safe_load(f)
+            logger.info(f"Загружено {len(self.questions)} вопросов из {self.questions_file}")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки вопросов: {e}")
+            raise
+    
+    def get_question(self, question_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Получить вопрос по ID
         
-        if q_num > 0:
-            # Находим начало текста (после эмодзи)
-            lines = text.split('\n')
-            if lines:
-                # Добавляем номер вопроса к первой строке
-                first_line = lines[0]
-                if 'ВОПРОС' in first_line:
-                    # Уже есть форматирование
-                    return text
-                else:
-                    # Добавляем форматирование
-                    lines[0] = f"📋 *ВОПРОС {q_num}/{total}:*\n\n{first_line}"
-                    text = '\n'.join(lines)
+        Args:
+            question_id: ID вопроса (например, "Q1", "Q5")
         
-        # Заменяем плейсхолдеры
-        if '{user_name}' in text and session.full_name:
-            text = text.replace('{user_name}', session.full_name)
+        Returns:
+            Словарь с данными вопроса или None
+        """
+        return self.questions.get(question_id)
+    
+    def get_next_question_id(self, current_id: str) -> Optional[str]:
+        """
+        Получить ID следующего вопроса
+        
+        Args:
+            current_id: Текущий ID вопроса
+        
+        Returns:
+            ID следующего вопроса или None
+        """
+        current_question = self.get_question(current_id)
+        if not current_question:
+            return None
+        
+        next_id = current_question.get('next')
+        if next_id == 'processing':
+            return None  # Анкета завершена
+        
+        return next_id
+    
+    def format_question_text(self, question_data: Dict[str, Any]) -> str:
+        """
+        Форматировать текст вопроса
+        
+        Args:
+            question_data: Данные вопроса
+        
+        Returns:
+            Отформатированный текст
+        """
+        text = question_data.get('question', '')
+        
+        if 'description' in question_data:
+            desc = question_data['description']
+            if isinstance(desc, str):
+                text += f"\n\n{desc}"
+            elif isinstance(desc, dict):
+                text += f"\n\n{desc}"
+        
+        if 'scenario' in question_data:
+            text += f"\n\n📖 {question_data['scenario']}"
+        
+        if 'hint' in question_data:
+            text += f"\n\n💡 {question_data['hint']}"
         
         return text
     
-    def create_keyboard_for_question(self, question: Dict[str, Any]) -> Optional[InlineKeyboardMarkup]:
-        """Создать клавиатуру для вопроса"""
-        question_type = question.get('type', 'text')
-        options = question.get('options', [])
+    def create_keyboard(
+        self, 
+        question_data: Dict[str, Any], 
+        session: Optional[UserSession] = None
+    ) -> Optional[InlineKeyboardMarkup]:
+        """
+        Создать клавиатуру для вопроса
         
-        if question_type == 'buttons' and options:
-            keyboard = []
-            for option in options:
-                button_text = option.get('text', '')
-                button_data = option.get('value', '')
-                keyboard.append([InlineKeyboardButton(button_text, callback_data=button_data)])
-            return InlineKeyboardMarkup(keyboard)
+        Args:
+            question_data: Данные вопроса
+            session: Сессия пользователя (для отображения выбранных вариантов)
         
-        elif question_type == 'multiselect' and options:
-            # Для мультиселекта - кнопки с флажками
-            keyboard = []
-            for option in options:
-                button_text = f"□ {option.get('text', '')}"
-                button_data = f"select_{option.get('value', '')}"
-                keyboard.append([InlineKeyboardButton(button_text, callback_data=button_data)])
-            
-            # Кнопка подтверждения выбора
-            keyboard.append([InlineKeyboardButton("✅ Завершить выбор", callback_data="multiselect_done")])
-            return InlineKeyboardMarkup(keyboard)
+        Returns:
+            InlineKeyboardMarkup или None
+        """
+        question_type = question_data.get('type')
+        
+        if question_type in ['text', 'existential_text']:
+            return None  # Текстовый ввод без кнопок
+        
+        if question_type in ['quick_buttons', 'choice', 'superhero_metaphor']:
+            return self._create_simple_keyboard(question_data)
+        
+        if question_type == 'multi_select':
+            return self._create_multiselect_keyboard(question_data, session)
+        
+        if question_type == 'scenario_test':
+            return self._create_scenario_keyboard(question_data)
+        
+        if question_type == 'slider_with_scenario':
+            return self._create_slider_keyboard(question_data, session)
+        
+        if question_type == 'skill_rating':
+            return self._create_rating_keyboard(question_data, session)
+        
+        if question_type == 'learning_allocation':
+            return self._create_allocation_keyboard(question_data, session)
+        
+        if question_type == 'energy_distribution':
+            return self._create_energy_keyboard(question_data, session)
+        
+        if question_type == 'flow_experience':
+            return self._create_flow_keyboard(question_data)
+        
+        if question_type == 'client_portrait':
+            return self._create_portrait_keyboard(question_data, session)
         
         return None
     
-    def validate_answer(self, question: Dict[str, Any], answer: Any) -> Tuple[bool, str]:
-        """Проверить валидность ответа"""
-        question_type = question.get('type', 'text')
+    def _create_simple_keyboard(self, question_data: Dict[str, Any]) -> InlineKeyboardMarkup:
+        """Создать простую клавиатуру с кнопками"""
+        keyboard = []
+        options = question_data.get('options', [])
         
-        if question_type == 'text':
-            min_length = question.get('min_length', 0)
-            max_length = question.get('max_length', 1000)
+        for option in options:
+            value = option.get('value')
+            label = option.get('label')
+            emoji = option.get('emoji', '')
             
-            if not isinstance(answer, str):
-                return False, "Ответ должен быть текстом"
-            
-            answer_len = len(answer.strip())
-            if answer_len < min_length:
-                return False, f"Ответ слишком короткий. Минимум {min_length} символов."
-            if answer_len > max_length:
-                return False, f"Ответ слишком длинный. Максимум {max_length} символов."
-            
-            return True, ""
+            button_text = f"{emoji} {label}" if emoji else label
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"answer:{value}")])
         
-        elif question_type == 'slider':
-            try:
-                value = int(answer)
-                min_val = question.get('min', 1)
-                max_val = question.get('max', 10)
-                
-                if min_val <= value <= max_val:
-                    return True, ""
-                else:
-                    return False, f"Значение должно быть от {min_val} до {max_val}"
-            except:
-                return False, "Неверный формат числа"
+        # Добавить кнопку "Назад" если это не первый вопрос
+        if question_data.get('category') != 'demographic' or 'Q1' not in str(question_data):
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
         
-        elif question_type == 'multiselect':
-            if not isinstance(answer, list):
-                answer = [answer] if answer else []
-            
-            min_select = question.get('min_selections', 1)
-            max_select = question.get('max_selections', 10)
-            
-            if len(answer) < min_select:
-                return False, f"Выберите хотя бы {min_select} вариант(а)"
-            if len(answer) > max_select:
-                return False, f"Выберите не более {max_select} вариантов"
-            
-            return True, ""
-        
-        return True, ""
+        return InlineKeyboardMarkup(keyboard)
     
-    def process_answer(self, session: UserSession, question: Dict[str, Any], answer: Any) -> bool:
-        """Обработать ответ пользователя"""
-        try:
-            question_id = question.get('id')
-            question_index = session.current_question_index
+    def _create_multiselect_keyboard(
+        self, 
+        question_data: Dict[str, Any], 
+        session: Optional[UserSession]
+    ) -> InlineKeyboardMarkup:
+        """Создать клавиатуру для множественного выбора"""
+        keyboard = []
+        options = question_data.get('options', [])
+        
+        # Получить уже выбранные варианты
+        question_id = self._get_question_id(question_data)
+        selected = []
+        if session:
+            temp_key = f"{question_id}_selected"
+            selected = session.temp_data.get(temp_key, [])
+        
+        for option in options:
+            value = option.get('value')
+            label = option.get('label')
+            emoji = option.get('emoji', '')
             
-            # Валидация ответа
-            is_valid, error_message = self.validate_answer(question, answer)
-            if not is_valid:
-                logger.warning(f"Невалидный ответ: {error_message}")
-                return False
+            # Добавить галочку если выбрано
+            checkmark = "✅ " if value in selected else ""
+            button_text = f"{checkmark}{emoji} {label}" if emoji else f"{checkmark}{label}"
             
-            # Сохраняем ответ в сессию
-            if session.save_answer(question_index + 1, answer):
-                logger.info(f"Ответ сохранен для вопроса {question_id}")
-                
-                # Если это последний вопрос, помечаем как завершенный
-                if question_index >= self.total_questions - 1:
-                    session.mark_completed()
-                    logger.info(f"Анкета пользователя {session.user_id} завершена")
-                else:
-                    # Переходим к следующему вопросу
-                    session.current_question_index += 1
-                    session.current_state = self._get_state_for_question(session.current_question_index)
-                
-                return True
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Ошибка обработки ответа: {e}")
-            return False
+            keyboard.append([InlineKeyboardButton(
+                button_text, 
+                callback_data=f"multiselect:{value}"
+            )])
+        
+        # Кнопки управления
+        validation = question_data.get('validation', {})
+        min_choices = validation.get('min_choices', 1)
+        max_choices = validation.get('max_choices', 10)
+        
+        info_text = f"📊 Выбрано: {len(selected)} (мин: {min_choices}, макс: {max_choices})"
+        keyboard.append([InlineKeyboardButton(info_text, callback_data="info")])
+        
+        if len(selected) >= min_choices:
+            keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
+        
+        return InlineKeyboardMarkup(keyboard)
     
-    def get_help_text(self, question: Dict[str, Any]) -> str:
-        """Получить текст подсказки для вопроса"""
-        help_text = question.get('help_text', '')
+    def _create_scenario_keyboard(self, question_data: Dict[str, Any]) -> InlineKeyboardMarkup:
+        """Создать клавиатуру для сценарного вопроса"""
+        keyboard = []
+        options = question_data.get('options', [])
         
-        # Добавляем специфичные подсказки по типу вопроса
-        question_type = question.get('type', 'text')
+        for option in options:
+            value = option.get('value')
+            label = option.get('label')
+            description = option.get('description', '')
+            
+            button_text = label
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"scenario:{value}")])
+            
+            # Добавить описание как отдельную строку (неактивная кнопка)
+            if description:
+                keyboard.append([InlineKeyboardButton(
+                    f"    └─ {description}", 
+                    callback_data="info"
+                )])
         
-        if question_type == 'slider':
-            min_val = question.get('min', 1)
-            max_val = question.get('max', 10)
-            default = question.get('default_value', min_val)
-            labels = question.get('labels', {})
-            
-            help_parts = []
-            if help_text:
-                help_parts.append(help_text)
-            
-            help_parts.append(f"📏 Диапазон: от {min_val} до {max_val}")
-            
-            if labels:
-                labels_text = " | ".join([f"{k}: {v}" for k, v in labels.items()])
-                help_parts.append(f"🏷️ Значения: {labels_text}")
-            
-            if default:
-                help_parts.append(f"⚙️ По умолчанию: {default}")
-            
-            return "\n".join(help_parts)
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
         
-        elif question_type == 'multiselect':
-            min_select = question.get('min_selections', 1)
-            max_select = question.get('max_selections', 10)
-            
-            help_parts = []
-            if help_text:
-                help_parts.append(help_text)
-            
-            if min_select == max_select:
-                help_parts.append(f"📌 Выберите ровно {min_select} вариант(а)")
-            else:
-                help_parts.append(f"📌 Выберите от {min_select} до {max_select} вариантов")
-            
-            help_parts.append("ℹ️ Нажмите на вариант, чтобы выбрать/снять выбор")
-            help_parts.append("✅ Нажмите 'Завершить выбор', когда закончите")
-            
-            return "\n".join(help_parts)
-        
-        return help_text if help_text else "Введите ваш ответ"
+        return InlineKeyboardMarkup(keyboard)
     
-    def _get_state_for_question(self, question_index: int) -> BotState:
-        """Получить состояние бота для вопроса"""
-        # Простая логика - по индексам вопросов
-        if question_index < 3:  # Вопросы 1-3
-            return BotState.DEMOGRAPHY
-        elif question_index < 12:  # Вопросы 4-12
-            return BotState.PERSONALITY
-        elif question_index < 22:  # Вопросы 13-22
-            return BotState.SKILLS
-        elif question_index < 29:  # Вопросы 23-29
-            return BotState.VALUES
-        elif question_index < 35:  # Вопросы 30-35
-            return BotState.LIMITATIONS
+    def _create_slider_keyboard(
+        self, 
+        question_data: Dict[str, Any], 
+        session: Optional[UserSession]
+    ) -> InlineKeyboardMarkup:
+        """Создать клавиатуру со слайдером"""
+        keyboard = []
+        
+        # Сначала показываем варианты сценария
+        options = question_data.get('options', [])
+        question_id = self._get_question_id(question_data)
+        
+        # Проверяем, выбран ли вариант сценария
+        selected_option = None
+        if session:
+            selected_option = session.temp_data.get(f"{question_id}_option")
+        
+        if not selected_option:
+            # Показываем варианты сценария
+            for option in options:
+                value = option.get('value')
+                label = option.get('label')
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"slider_option:{value}")])
         else:
-            return BotState.ANALYZING
-    
-    def format_slider_value(self, value: int, question: Dict[str, Any]) -> str:
-        """Форматировать значение ползунка"""
-        min_val = question.get('min', 1)
-        max_val = question.get('max', 10)
-        unit = question.get('unit', '')
-        labels = question.get('labels', {})
-        
-        # Ищем ближайшую метку
-        if labels:
-            # Преобразуем ключи в int
-            label_keys = []
-            for k in labels.keys():
-                try:
-                    label_keys.append(int(k))
-                except:
-                    pass
+            # Показываем слайдер
+            slider_data = question_data.get('slider', {})
+            min_val = slider_data.get('min', 1)
+            max_val = slider_data.get('max', 10)
+            current_val = session.temp_data.get(f"{question_id}_value", 5) if session else 5
             
-            if label_keys:
-                # Находим ближайшую метку
-                closest_key = min(label_keys, key=lambda x: abs(x - value))
-                label = labels.get(str(closest_key), '')
-                if label:
-                    return f"{value} {unit} ({label})".strip()
+            # Визуализация слайдера
+            slider_text = f"{slider_data.get('label', 'Уровень:')} {current_val}/{max_val}"
+            keyboard.append([InlineKeyboardButton(slider_text, callback_data="info")])
+            
+            # Кнопки управления
+            row = []
+            if current_val > min_val:
+                row.append(InlineKeyboardButton("➖", callback_data="slider_dec"))
+            row.append(InlineKeyboardButton(f"{current_val}", callback_data="info"))
+            if current_val < max_val:
+                row.append(InlineKeyboardButton("➕", callback_data="slider_inc"))
+            keyboard.append(row)
+            
+            # Визуальная шкала
+            scale = self._create_visual_scale(current_val, min_val, max_val)
+            keyboard.append([InlineKeyboardButton(scale, callback_data="info")])
+            
+            keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
         
-        return f"{value} {unit}".strip()
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
+        
+        return InlineKeyboardMarkup(keyboard)
     
-    def get_next_question_id(self, question: Dict[str, Any]) -> Optional[int]:
-        """Получить ID следующего вопроса"""
-        next_q = question.get('next_question')
-        if next_q is not None:
-            # next_question может быть null для последнего вопроса
-            if next_q is None:
-                return None
-            return int(next_q) - 1  # Преобразуем в 0-based индекс
-        return None
+    def _create_rating_keyboard(
+        self, 
+        question_data: Dict[str, Any], 
+        session: Optional[UserSession]
+    ) -> InlineKeyboardMarkup:
+        """Создать клавиатуру для рейтинга навыков"""
+        keyboard = []
+        skills = question_data.get('skills', [])
+        question_id = self._get_question_id(question_data)
+        
+        # Получить текущие рейтинги
+        ratings = {}
+        if session:
+            ratings = session.temp_data.get(f"{question_id}_ratings", {})
+        
+        rating_scale = question_data.get('rating_scale', {})
+        max_stars = rating_scale.get('max', 5)
+        star_emoji = rating_scale.get('star_emoji', '⭐')
+        empty_emoji = rating_scale.get('empty_emoji', '☆')
+        
+        for skill in skills:
+            skill_id = skill.get('id')
+            label = skill.get('label')
+            emoji = skill.get('emoji', '')
+            
+            current_rating = ratings.get(skill_id, 0)
+            
+            # Визуализация звезд
+            stars = star_emoji * current_rating + empty_emoji * (max_stars - current_rating)
+            button_text = f"{emoji} {label}"
+            
+            keyboard.append([InlineKeyboardButton(button_text, callback_data="info")])
+            
+            # Кнопки рейтинга
+            rating_row = []
+            for i in range(1, max_stars + 1):
+                rating_row.append(InlineKeyboardButton(
+                    f"{i}⭐" if i == current_rating else str(i),
+                    callback_data=f"rating:{skill_id}:{i}"
+                ))
+            keyboard.append(rating_row)
+        
+        # Проверка заполненности
+        all_rated = len(ratings) == len(skills) and all(r > 0 for r in ratings.values())
+        
+        if all_rated:
+            keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        else:
+            keyboard.append([InlineKeyboardButton(
+                f"📊 Оценено: {len([r for r in ratings.values() if r > 0])}/{len(skills)}", 
+                callback_data="info"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _create_allocation_keyboard(
+        self, 
+        question_data: Dict[str, Any], 
+        session: Optional[UserSession]
+    ) -> InlineKeyboardMarkup:
+        """Создать клавиатуру для распределения баллов"""
+        keyboard = []
+        formats = question_data.get('formats', [])
+        total_points = question_data.get('total_points', 10)
+        question_id = self._get_question_id(question_data)
+        
+        # Получить текущее распределение
+        allocation = {}
+        if session:
+            allocation = session.temp_data.get(f"{question_id}_allocation", {})
+        
+        # Вычислить использованные баллы
+        used_points = sum(allocation.values())
+        remaining = total_points - used_points
+        
+        # Показать каждый формат
+        for fmt in formats:
+            fmt_id = fmt.get('id')
+            label = fmt.get('label')
+            emoji = fmt.get('emoji', '')
+            
+            current_value = allocation.get(fmt_id, 0)
+            
+            button_text = f"{emoji} {label}: {current_value}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data="info")])
+            
+            # Кнопки +/-
+            row = []
+            if current_value > 0:
+                row.append(InlineKeyboardButton("➖", callback_data=f"alloc_dec:{fmt_id}"))
+            row.append(InlineKeyboardButton(f"{current_value}", callback_data="info"))
+            if remaining > 0:
+                row.append(InlineKeyboardButton("➕", callback_data=f"alloc_inc:{fmt_id}"))
+            keyboard.append(row)
+        
+        # Показать остаток
+        keyboard.append([InlineKeyboardButton(
+            f"📊 Осталось баллов: {remaining}/{total_points}", 
+            callback_data="info"
+        )])
+        
+        # Кнопка продолжить только если распределены все баллы
+        if remaining == 0:
+            keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _create_energy_keyboard(
+        self, 
+        question_data: Dict[str, Any], 
+        session: Optional[UserSession]
+    ) -> InlineKeyboardMarkup:
+        """Создать клавиатуру для распределения энергии"""
+        keyboard = []
+        question_id = self._get_question_id(question_data)
+        
+        # Получить текущее состояние
+        step = session.temp_data.get(f"{question_id}_step", 'periods') if session else 'periods'
+        
+        if step == 'periods':
+            # Шаг 1: Оценка энергии по периодам дня
+            time_periods = question_data.get('time_periods', [])
+            energy_levels = {}
+            if session:
+                energy_levels = session.temp_data.get(f"{question_id}_energy", {})
+            
+            for period_data in time_periods:
+                period = period_data.get('period')
+                label = period_data.get('label')
+                emoji = period_data.get('emoji', '')
+                min_val = period_data.get('min', 1)
+                max_val = period_data.get('max', 7)
+                
+                current = energy_levels.get(period, 4)
+                
+                keyboard.append([InlineKeyboardButton(
+                    f"{emoji} {label}", 
+                    callback_data="info"
+                )])
+                
+                # Визуальная шкала
+                scale = self._create_visual_scale(current, min_val, max_val, "▁▂▃▄▅▆▇")
+                keyboard.append([InlineKeyboardButton(scale, callback_data="info")])
+                
+                # Кнопки управления
+                row = []
+                if current > min_val:
+                    row.append(InlineKeyboardButton("➖", callback_data=f"energy_dec:{period}"))
+                row.append(InlineKeyboardButton(f"{current}", callback_data="info"))
+                if current < max_val:
+                    row.append(InlineKeyboardButton("➕", callback_data=f"energy_inc:{period}"))
+                keyboard.append(row)
+            
+            # Проверка заполненности
+            all_set = len(energy_levels) == len(time_periods)
+            if all_set:
+                keyboard.append([InlineKeyboardButton(
+                    "➡️ Далее (выбор времени для активностей)", 
+                    callback_data="energy_next"
+                )])
+        
+        else:
+            # Шаг 2: Выбор оптимального времени для активностей
+            activity_types = question_data.get('activity_types', [])
+            activity_times = {}
+            if session:
+                activity_times = session.temp_data.get(f"{question_id}_activities", {})
+            
+            for activity in activity_types:
+                act_type = activity.get('type')
+                label = activity.get('label')
+                options = activity.get('options', [])
+                
+                selected = activity_times.get(act_type)
+                
+                keyboard.append([InlineKeyboardButton(f"📌 {label}", callback_data="info")])
+                
+                row = []
+                for opt in options:
+                    checkmark = "✅ " if selected == opt else ""
+                    row.append(InlineKeyboardButton(
+                        f"{checkmark}{opt}", 
+                        callback_data=f"activity:{act_type}:{opt}"
+                    ))
+                keyboard.append(row)
+            
+            # Кнопка продолжить
+            all_selected = len(activity_times) == len(activity_types)
+            if all_selected:
+                keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _create_flow_keyboard(self, question_data: Dict[str, Any]) -> InlineKeyboardMarkup:
+        """Создать клавиатуру для вопроса о состоянии потока"""
+        keyboard = []
+        examples = question_data.get('examples', [])
+        
+        for example in examples:
+            value = example.get('value')
+            label = example.get('label')
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"flow:{value}")])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _create_portrait_keyboard(
+        self, 
+        question_data: Dict[str, Any], 
+        session: Optional[UserSession]
+    ) -> InlineKeyboardMarkup:
+        """Создать клавиатуру для портрета клиента"""
+        keyboard = []
+        question_id = self._get_question_id(question_data)
+        
+        # Проверяем текущий шаг
+        current_field = None
+        if session:
+            current_field = session.temp_data.get(f"{question_id}_current_field")
+        
+        demographics = question_data.get('demographics', {})
+        
+        if not current_field:
+            # Начинаем с первого поля
+            first_field = list(demographics.keys())[0]
+            current_field = first_field
+        
+        # Получаем данные текущего поля
+        field_data = demographics.get(current_field, {})
+        label = field_data.get('label', current_field)
+        options = field_data.get('options', [])
+        
+        keyboard.append([InlineKeyboardButton(f"📋 {label}", callback_data="info")])
+        
+        for option in options:
+            keyboard.append([InlineKeyboardButton(
+                option, 
+                callback_data=f"portrait:{current_field}:{option}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _create_visual_scale(
+        self, 
+        current: int, 
+        min_val: int, 
+        max_val: int, 
+        chars: str = "▁▂▃▄▅▆▇█"
+    ) -> str:
+        """
+        Создать визуальную шкалу
+        
+        Args:
+            current: Текущее значение
+            min_val: Минимум
+            max_val: Максимум
+            chars: Символы для отображения
+        
+        Returns:
+            Строка со шкалой
+        """
+        total_steps = len(chars)
+        normalized = (current - min_val) / (max_val - min_val)
+        step = int(normalized * (total_steps - 1))
+        
+        filled = chars[-1] * step
+        empty = chars[0] * (total_steps - step - 1)
+        current_char = chars[step]
+        
+        return f"{filled}{current_char}{empty}"
+    
+    def _get_question_id(self, question_data: Dict[str, Any]) -> str:
+        """Получить ID вопроса из данных"""
+        # Поиск ID по обратной связи
+        for qid, data in self.questions.items():
+            if data == question_data:
+                return qid
+        return "unknown"
+    
+    def validate_answer(
+        self, 
+        question_id: str, 
+        answer: Any, 
+        session: Optional[UserSession] = None
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Валидировать ответ на вопрос
+        
+        Args:
+            question_id: ID вопроса
+            answer: Ответ пользователя
+            session: Сессия (для сложных валидаций)
+        
+        Returns:
+            Tuple (is_valid, error_message)
+        """
+        question = self.get_question(question_id)
+        if not question:
+            return False, "Вопрос не найден"
+        
+        validation = question.get('validation', {})
+        
+        # Required check
+        if validation.get('required') and not answer:
+            return False, "Это обязательный вопрос"
+        
+        # Text length checks
+        if isinstance(answer, str):
+            min_length = validation.get('min_length')
+            max_length = validation.get('max_length')
+            
+            if min_length and len(answer) < min_length:
+                return False, f"Минимальная длина ответа: {min_length} символов"
+            
+            if max_length and len(answer) > max_length:
+                return False, f"Максимальная длина ответа: {max_length} символов"
+        
+        # Multi-select checks
+        if isinstance(answer, list):
+            min_choices = validation.get('min_choices')
+            max_choices = validation.get('max_choices')
+            
+            if min_choices and len(answer) < min_choices:
+                return False, f"Выберите минимум {min_choices} вариант(ов)"
+            
+            if max_choices and len(answer) > max_choices:
+                return False, f"Максимум {max_choices} вариант(ов)"
+        
+        # Sum equals check (для распределения баллов)
+        if validation.get('sum_equals') and isinstance(answer, dict):
+            expected_sum = validation['sum_equals']
+            actual_sum = sum(answer.values())
+            
+            if actual_sum != expected_sum:
+                return False, f"Сумма должна быть {expected_sum}, текущая: {actual_sum}"
+        
+        return True, None
+```
 
-# Глобальный экземпляр движка
-question_engine = QuestionEngine()
+---
