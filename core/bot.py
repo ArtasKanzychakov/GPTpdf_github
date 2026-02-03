@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Основной модуль бота Бизнес-Навигатор
+Основной класс бота Бизнес-Навигатор v7.1
 """
 
 import asyncio
@@ -52,7 +52,6 @@ class BusinessNavigatorBot:
         self._status = BotStatus()
         self._bot_task: Optional[asyncio.Task] = None
         
-        # Инициализация
         self._initialize_application()
     
     def _initialize_application(self) -> None:
@@ -60,7 +59,6 @@ class BusinessNavigatorBot:
         try:
             logger.info("🤖 Инициализация Telegram Application...")
             
-            # Создаем Application с использованием токена
             self.application = (
                 ApplicationBuilder()
                 .token(self.config.telegram_token)
@@ -69,40 +67,32 @@ class BusinessNavigatorBot:
                 .build()
             )
             
-            # Настройка обработчиков
             self._setup_handlers()
-            
             logger.info("✅ Telegram Application инициализирован")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка инициализации Application: {e}")
+            logger.error(f"❌ Ошибка инициализации: {e}")
             raise
     
     def _setup_handlers(self) -> None:
-        """Настройка всех обработчиков команд и сообщений"""
+        """Настройка всех обработчиков"""
         if not self.application:
             logger.error("❌ Application не инициализирован")
             return
         
         logger.info("⚙️ Настройка обработчиков...")
         
-        # Обработчики команд
+        # Команды
         self.application.add_handler(CommandHandler("start", start_command))
         self.application.add_handler(CommandHandler("help", help_command))
         self.application.add_handler(CommandHandler("restart", restart_command))
         self.application.add_handler(CommandHandler("status", status_command))
+        self.application.add_handler(CommandHandler("questionnaire", start_questionnaire))
         
-        # Обработчики анкеты
-        self.application.add_handler(
-            CommandHandler("questionnaire", start_questionnaire)
-        )
+        # Callback запросы (кнопки)
+        self.application.add_handler(CallbackQueryHandler(handle_callback_query))
         
-        # Обработчики callback запросов (кнопки)
-        self.application.add_handler(
-            CallbackQueryHandler(handle_callback_query)
-        )
-        
-        # Обработчики текстовых сообщений
+        # Текстовые сообщения
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_question_answer)
         )
@@ -113,16 +103,15 @@ class BusinessNavigatorBot:
         logger.info("✅ Обработчики настроены")
     
     async def _post_init(self, application: Application) -> None:
-        """Вызывается после инициализации бота"""
+        """Post-init callback"""
         logger.info("🔄 Post-init выполнен")
         self._status.started_at = datetime.now().timestamp()
     
     async def _post_shutdown(self, application: Application) -> None:
-        """Вызывается после завершения работы бота"""
+        """Post-shutdown callback"""
         logger.info("🔄 Post-shutdown выполнен")
         self._status.is_running = False
         
-        # Сохраняем данные при завершении
         try:
             if data_manager:
                 data_manager.cleanup_old_sessions(days=1)
@@ -132,60 +121,53 @@ class BusinessNavigatorBot:
     
     async def _error_handler(self, update: object, context) -> None:
         """Обработчик ошибок"""
-        logger.error(f"❌ Ошибка при обработке обновления: {context.error}")
+        logger.error(f"❌ Ошибка: {context.error}")
         
         try:
-            # Пытаемся отправить сообщение пользователю
             if update and hasattr(update, 'effective_chat'):
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text="⚠️ Произошла техническая ошибка. Пожалуйста, попробуйте позже или используйте команду /start"
+                    text="⚠️ Произошла техническая ошибка. Попробуйте /start"
                 )
         except Exception as e:
             logger.error(f"❌ Не удалось отправить сообщение об ошибке: {e}")
     
     async def start(self) -> None:
-        """Запуск бота в фоновом режиме"""
+        """Запуск бота"""
         if self._status.is_running:
             logger.warning("⚠️ Бот уже запущен")
             return
         
         try:
-            logger.info("▶️ Запуск бота в фоновом режиме...")
+            logger.info("▶️ Запуск бота...")
             
             if not self.application:
                 logger.error("❌ Application не инициализирован")
                 return
             
-            # Инициализируем Application
             await self.application.initialize()
             
-            # Запускаем polling в фоновой задаче
-            self._bot_task = asyncio.create_task(
-                self._run_polling()
-            )
+            self._bot_task = asyncio.create_task(self._run_polling())
             
             self._status.is_running = True
             self._status.total_users = len(data_manager.sessions)
             self._status.active_sessions = len(data_manager.sessions)
             
-            logger.info("✅ Бот запущен в фоновом режиме")
-            logger.info(f"📊 Пользователей в базе: {self._status.total_users}")
-            logger.info(f"📊 Активных сессий: {self._status.active_sessions}")
+            logger.info("✅ Бот запущен")
+            logger.info(f"📊 Пользователей: {self._status.total_users}")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка при запуске бота: {e}", exc_info=True)
+            logger.error(f"❌ Ошибка при запуске: {e}", exc_info=True)
             self._status.is_running = False
             raise
     
     async def _run_polling(self) -> None:
-        """Запуск polling в отдельной задаче"""
+        """Запуск polling"""
         try:
             logger.info("📡 Запуск polling...")
             
             await self.application.start()
             
-            # Запускаем polling с параметрами
             await self.application.updater.start_polling(
                 poll_interval=0.5,
                 timeout=10,
@@ -193,14 +175,12 @@ class BusinessNavigatorBot:
                 allowed_updates=["message", "callback_query"]
             )
             
-            # Бесконечный цикл для поддержания работы
             while self._status.is_running:
                 await asyncio.sleep(1)
             
         except asyncio.CancelledError:
             logger.info("⏹️ Polling отменен")
             raise
-            
         except Exception as e:
             logger.error(f"❌ Ошибка в polling: {e}", exc_info=True)
             raise
@@ -214,10 +194,8 @@ class BusinessNavigatorBot:
         try:
             logger.info("⏹️ Остановка бота...")
             
-            # Помечаем как неактивный
             self._status.is_running = False
             
-            # Отменяем задачу polling
             if self._bot_task and not self._bot_task.done():
                 self._bot_task.cancel()
                 try:
@@ -225,7 +203,6 @@ class BusinessNavigatorBot:
                 except asyncio.CancelledError:
                     logger.info("✅ Задача polling отменена")
             
-            # Останавливаем Application
             if self.application:
                 if self.application.updater and self.application.updater.running:
                     await self.application.updater.stop()
@@ -233,14 +210,14 @@ class BusinessNavigatorBot:
                 await self.application.shutdown()
                 logger.info("✅ Application остановлен")
             
-            logger.info("✅ Бот полностью остановлен")
+            logger.info("✅ Бот остановлен")
             
         except Exception as e:
-            logger.error(f"❌ Ошибка при остановке бота: {e}")
+            logger.error(f"❌ Ошибка при остановке: {e}")
             raise
     
     def get_status(self) -> Dict[str, Any]:
-        """Получение текущего статуса бота"""
+        """Получение статуса бота"""
         return {
             "is_running": self._status.is_running,
             "started_at": self._status.started_at,
@@ -255,10 +232,10 @@ class BusinessNavigatorBot:
     
     @property
     def is_running(self) -> bool:
-        """Статус работы бота (только чтение)"""
+        """Статус работы бота"""
         return self._status.is_running
     
     @property
     def bot_task(self):
-        """Задача бота (только чтение)"""
+        """Задача бота"""
         return self._bot_task
