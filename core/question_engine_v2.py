@@ -1,4 +1,3 @@
-
 """
 Движок вопросов v2.0 для Business Navigator
 Поддержка всех типов интерактивных вопросов
@@ -219,17 +218,7 @@ class QuestionEngineV2:
         for option in options:
             value = option.get('value')
             label = option.get('label')
-            description = option.get('description', '')
-            
-            button_text = label
-            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"scenario:{value}")])
-            
-            # Добавить описание как отдельную строку (неактивная кнопка)
-            if description:
-                keyboard.append([InlineKeyboardButton(
-                    f"    └─ {description}", 
-                    callback_data="info"
-                )])
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"scenario:{value}")])
         
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
         
@@ -240,50 +229,46 @@ class QuestionEngineV2:
         question_data: Dict[str, Any], 
         session: Optional[UserSession]
     ) -> InlineKeyboardMarkup:
-        """Создать клавиатуру со слайдером"""
+        """Создать клавиатуру-слайдер"""
         keyboard = []
-        
-        # Сначала показываем варианты сценария
-        options = question_data.get('options', [])
         question_id = self._get_question_id(question_data)
         
-        # Проверяем, выбран ли вариант сценария
-        selected_option = None
+        # Получить текущее значение
+        current_value = 4
         if session:
-            selected_option = session.temp_data.get(f"{question_id}_option")
+            current_value = session.temp_data.get(f"{question_id}_value", 4)
         
-        if not selected_option:
-            # Показываем варианты сценария
-            for option in options:
-                value = option.get('value')
-                label = option.get('label')
-                keyboard.append([InlineKeyboardButton(label, callback_data=f"slider_option:{value}")])
-        else:
-            # Показываем слайдер
-            slider_data = question_data.get('slider', {})
-            min_val = slider_data.get('min', 1)
-            max_val = slider_data.get('max', 10)
-            current_val = session.temp_data.get(f"{question_id}_value", 5) if session else 5
-            
-            # Визуализация слайдера
-            slider_text = f"{slider_data.get('label', 'Уровень:')} {current_val}/{max_val}"
-            keyboard.append([InlineKeyboardButton(slider_text, callback_data="info")])
-            
-            # Кнопки управления
-            row = []
-            if current_val > min_val:
-                row.append(InlineKeyboardButton("➖", callback_data="slider_dec"))
-            row.append(InlineKeyboardButton(f"{current_val}", callback_data="info"))
-            if current_val < max_val:
-                row.append(InlineKeyboardButton("➕", callback_data="slider_inc"))
-            keyboard.append(row)
-            
-            # Визуальная шкала
-            scale = self._create_visual_scale(current_val, min_val, max_val)
-            keyboard.append([InlineKeyboardButton(scale, callback_data="info")])
-            
-            keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        min_val = question_data.get('min', 1)
+        max_val = question_data.get('max', 7)
         
+        # Визуальная шкала
+        scale = self._create_visual_scale(current_value, min_val, max_val)
+        keyboard.append([InlineKeyboardButton(scale, callback_data="info")])
+        
+        # Кнопки управления
+        row = []
+        if current_value > min_val:
+            row.append(InlineKeyboardButton("➖➖", callback_data="slider_dec2"))
+            row.append(InlineKeyboardButton("➖", callback_data="slider_dec"))
+        
+        row.append(InlineKeyboardButton(f"【 {current_value} 】", callback_data="info"))
+        
+        if current_value < max_val:
+            row.append(InlineKeyboardButton("➕", callback_data="slider_inc"))
+            row.append(InlineKeyboardButton("➕➕", callback_data="slider_inc2"))
+        
+        keyboard.append(row)
+        
+        # Метки
+        min_label = question_data.get('min_label', str(min_val))
+        max_label = question_data.get('max_label', str(max_val))
+        keyboard.append([InlineKeyboardButton(
+            f"{min_label} ◀━━━━▶ {max_label}", 
+            callback_data="info"
+        )])
+        
+        # Кнопки действий
+        keyboard.append([InlineKeyboardButton("✅ Подтвердить", callback_data="submit")])
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
         
         return InlineKeyboardMarkup(keyboard)
@@ -293,53 +278,43 @@ class QuestionEngineV2:
         question_data: Dict[str, Any], 
         session: Optional[UserSession]
     ) -> InlineKeyboardMarkup:
-        """Создать клавиатуру для рейтинга навыков"""
+        """Создать клавиатуру для оценки навыков"""
         keyboard = []
-        skills = question_data.get('skills', [])
         question_id = self._get_question_id(question_data)
+        skills = question_data.get('skills', [])
         
         # Получить текущие рейтинги
         ratings = {}
         if session:
             ratings = session.temp_data.get(f"{question_id}_ratings", {})
         
-        rating_scale = question_data.get('rating_scale', {})
-        max_stars = rating_scale.get('max', 5)
-        star_emoji = rating_scale.get('star_emoji', '⭐')
-        empty_emoji = rating_scale.get('empty_emoji', '☆')
-        
         for skill in skills:
-            skill_id = skill.get('id')
-            label = skill.get('label')
-            emoji = skill.get('emoji', '')
+            skill_name = skill.get('name')
+            skill_label = skill.get('label')
+            min_val = skill.get('min', 1)
+            max_val = skill.get('max', 5)
             
-            current_rating = ratings.get(skill_id, 0)
+            current = ratings.get(skill_name, 3)
             
-            # Визуализация звезд
-            stars = star_emoji * current_rating + empty_emoji * (max_stars - current_rating)
-            button_text = f"{emoji} {label}"
+            keyboard.append([InlineKeyboardButton(f"📌 {skill_label}", callback_data="info")])
             
-            keyboard.append([InlineKeyboardButton(button_text, callback_data="info")])
+            # Визуальная шкала
+            scale = self._create_visual_scale(current, min_val, max_val, "⭐")
+            keyboard.append([InlineKeyboardButton(scale, callback_data="info")])
             
-            # Кнопки рейтинга
-            rating_row = []
-            for i in range(1, max_stars + 1):
-                rating_row.append(InlineKeyboardButton(
-                    f"{i}⭐" if i == current_rating else str(i),
-                    callback_data=f"rating:{skill_id}:{i}"
-                ))
-            keyboard.append(rating_row)
+            # Кнопки управления
+            row = []
+            if current > min_val:
+                row.append(InlineKeyboardButton("➖", callback_data=f"rating_dec:{skill_name}"))
+            row.append(InlineKeyboardButton(f"{current}", callback_data="info"))
+            if current < max_val:
+                row.append(InlineKeyboardButton("➕", callback_data=f"rating_inc:{skill_name}"))
+            keyboard.append(row)
         
         # Проверка заполненности
-        all_rated = len(ratings) == len(skills) and all(r > 0 for r in ratings.values())
-        
+        all_rated = len(ratings) == len(skills)
         if all_rated:
             keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
-        else:
-            keyboard.append([InlineKeyboardButton(
-                f"📊 Оценено: {len([r for r in ratings.values() if r > 0])}/{len(skills)}", 
-                callback_data="info"
-            )])
         
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
         
@@ -352,46 +327,55 @@ class QuestionEngineV2:
     ) -> InlineKeyboardMarkup:
         """Создать клавиатуру для распределения баллов"""
         keyboard = []
-        formats = question_data.get('formats', [])
-        total_points = question_data.get('total_points', 10)
         question_id = self._get_question_id(question_data)
+        areas = question_data.get('areas', [])
+        total_points = question_data.get('total_points', 100)
         
         # Получить текущее распределение
         allocation = {}
         if session:
             allocation = session.temp_data.get(f"{question_id}_allocation", {})
         
-        # Вычислить использованные баллы
+        # Подсчет использованных баллов
         used_points = sum(allocation.values())
         remaining = total_points - used_points
         
-        # Показать каждый формат
-        for fmt in formats:
-            fmt_id = fmt.get('id')
-            label = fmt.get('label')
-            emoji = fmt.get('emoji', '')
+        for area in areas:
+            area_name = area.get('name')
+            area_label = area.get('label')
+            min_val = area.get('min', 0)
+            max_val = area.get('max', 100)
             
-            current_value = allocation.get(fmt_id, 0)
+            current = allocation.get(area_name, 0)
             
-            button_text = f"{emoji} {label}: {current_value}"
-            keyboard.append([InlineKeyboardButton(button_text, callback_data="info")])
+            keyboard.append([InlineKeyboardButton(f"📚 {area_label}", callback_data="info")])
             
-            # Кнопки +/-
+            # Визуальная шкала процентов
+            if total_points > 0:
+                percent = int((current / total_points) * 100)
+                scale = self._create_visual_scale(percent, 0, 100, "░▒▓█")
+                keyboard.append([InlineKeyboardButton(f"{scale} {percent}%", callback_data="info")])
+            
+            # Кнопки управления
             row = []
-            if current_value > 0:
-                row.append(InlineKeyboardButton("➖", callback_data=f"alloc_dec:{fmt_id}"))
-            row.append(InlineKeyboardButton(f"{current_value}", callback_data="info"))
-            if remaining > 0:
-                row.append(InlineKeyboardButton("➕", callback_data=f"alloc_inc:{fmt_id}"))
+            step = area.get('step', 5)
+            if current > min_val:
+                row.append(InlineKeyboardButton("➖10", callback_data=f"alloc_dec10:{area_name}"))
+                row.append(InlineKeyboardButton("➖5", callback_data=f"alloc_dec5:{area_name}"))
+            row.append(InlineKeyboardButton(f"{current}", callback_data="info"))
+            if current < max_val and remaining >= step:
+                row.append(InlineKeyboardButton("➕5", callback_data=f"alloc_inc5:{area_name}"))
+                row.append(InlineKeyboardButton("➕10", callback_data=f"alloc_inc10:{area_name}"))
             keyboard.append(row)
         
-        # Показать остаток
+        # Информация об остатке
+        remaining_emoji = "✅" if remaining == 0 else "⚠️"
         keyboard.append([InlineKeyboardButton(
-            f"📊 Осталось баллов: {remaining}/{total_points}", 
+            f"{remaining_emoji} Осталось: {remaining} из {total_points}", 
             callback_data="info"
         )])
         
-        # Кнопка продолжить только если распределены все баллы
+        # Кнопка продолжить
         if remaining == 0:
             keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
         
@@ -408,11 +392,13 @@ class QuestionEngineV2:
         keyboard = []
         question_id = self._get_question_id(question_data)
         
-        # Получить текущее состояние
-        step = session.temp_data.get(f"{question_id}_step", 'periods') if session else 'periods'
+        # Проверяем текущий шаг
+        current_step = 1
+        if session:
+            current_step = session.temp_data.get(f"{question_id}_step", 1)
         
-        if step == 'periods':
-            # Шаг 1: Оценка энергии по периодам дня
+        if current_step == 1:
+            # Шаг 1: Оценка энергетики в разное время
             time_periods = question_data.get('time_periods', [])
             energy_levels = {}
             if session:
@@ -634,6 +620,3 @@ class QuestionEngineV2:
                 return False, f"Сумма должна быть {expected_sum}, текущая: {actual_sum}"
         
         return True, None
-```
-
----
