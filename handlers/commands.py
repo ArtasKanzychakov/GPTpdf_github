@@ -1,4 +1,4 @@
-**Файл: commands.py**
+
 
 ```python
 #!/usr/bin/env python3
