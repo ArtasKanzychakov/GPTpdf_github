@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, List
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -15,18 +15,18 @@ from telegram.ext import (
 from models.session import (
     UserSession,
     SessionStatus,
-    ConversationState,
 )
+
+from services.data_manager import DataManager
 from services.openai_service import OpenAIService
 from services.niche_generation_detailed import NicheGenerationService
-from services.data_manager import DataManager
-from services.question_engine_v2 import QuestionEngineV2
+
+# ✅ ВАЖНО: ПРАВИЛЬНЫЙ ИМПОРТ
+from core.question_engine_v2 import QuestionEngineV2
 
 logger = logging.getLogger(__name__)
 
-# -------------------------
 # Conversation states
-# -------------------------
 QUESTIONNAIRE = 1
 ANALYSIS = 2
 RESULT = 3
@@ -35,10 +35,7 @@ RESULT = 3
 class QuestionnaireHandler:
     """
     Основной обработчик анкеты.
-    Архитектура сохранена:
-    - ConversationHandler
-    - FSM
-    - QuestionEngineV2
+    Архитектура сохранена полностью.
     """
 
     def __init__(
@@ -170,20 +167,17 @@ class QuestionnaireHandler:
     async def _show_result(self, update: Update, session: UserSession):
         text_lines: List[str] = []
 
-        text_lines.append("🧠 *Психологический профиль:*")
+        text_lines.append("🧠 Психологический профиль:")
         text_lines.append(session.psychological_analysis.psychological_profile)
-        text_lines.append("\n🏭 *Рекомендованные бизнес-ниши:*")
+        text_lines.append("\n🏭 Рекомендованные бизнес-ниши:")
 
         for idx, niche in enumerate(session.niches, start=1):
             text_lines.append(
-                f"\n{idx}. *{niche.name}* (оценка {niche.score:.0f}/100)\n"
+                f"\n{idx}. {niche.name} (оценка {niche.score:.0f}/100)\n"
                 f"{niche.description}"
             )
 
-        await update.effective_message.reply_text(
-            "\n".join(text_lines),
-            parse_mode="Markdown",
-        )
+        await update.effective_message.reply_text("\n".join(text_lines))
 
         session.finish()
         self.data_manager.save_session(session)
@@ -225,12 +219,20 @@ class QuestionnaireHandler:
 # -------------------------------------------------
 def build_questionnaire_conversation(handler: QuestionnaireHandler):
     return ConversationHandler(
-        entry_points=[MessageHandler(filters.COMMAND & filters.Regex("^/start$"), handler.start)],
+        entry_points=[
+            MessageHandler(
+                filters.COMMAND & filters.Regex("^/start$"),
+                handler.start,
+            )
+        ],
         states={
             QUESTIONNAIRE: [
                 CallbackQueryHandler(handler.go_back, pattern="^__back__$"),
                 CallbackQueryHandler(handler.handle_answer),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handler.handle_answer),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handler.handle_answer,
+                ),
             ],
         },
         fallbacks=[],
