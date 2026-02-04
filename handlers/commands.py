@@ -27,7 +27,7 @@ from utils.formatters import (
 
 logger = logging.getLogger(__name__)
 
-# Используем глобальный data_manager из services.data_manager
+# Глобальный data_manager используется напрямую
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,7 +97,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /help"""
+    """Обработчик команда /help"""
     help_text = (
         "📚 Помощь по Бизнес-Навигатору v7.0\n\n"
         "🤖 Доступные команды:\n"
@@ -130,34 +130,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /stats"""
     try:
-        stats = data_manager.statistics
+        stats = data_manager.get_session_statistics()
 
         stats_text = (
             f"📊 *Статистика Бизнес-Навигатора v7.0*\n\n"
-            f"👥 Пользователей: {stats.total_users}\n"
-            f"📋 Сессий: {stats.total_sessions}\n"
-            f"✅ Завершено: {stats.completed_sessions}\n"
-            f"💬 Сообщений: {stats.total_messages}\n"
-            f"⚡ Активных: {stats.active_sessions}\n"
-            f"⏱️ Uptime: {stats.get_uptime()}\n\n"
+            f"👥 Всего сессий: {stats['total_sessions']}\n"
+            f"✅ Завершено: {stats['completed']}\n"
+            f"🔄 В процессе: {stats['in_progress']}\n"
+            f"📈 Средний прогресс: {stats['average_completion']} вопросов\n\n"
         )
 
-        # Добавляем статистику OpenAI если есть
-        if hasattr(stats, 'openai_requests') and stats.openai_requests > 0:
-            stats_text += (
-                f"*Использование OpenAI:*\n"
-                f"🤖 Запросов: {stats.openai_requests}\n"
-                f"🔤 Токенов: {stats.openai_tokens:,}\n"
-                f"💵 Стоимость: ${stats.openai_cost:.4f}\n\n"
-            )
-
-        # Добавляем время последней активности
-        if hasattr(data_manager, 'sessions') and data_manager.sessions:
-            recent_sessions = list(data_manager.sessions.values())[:3]
-            stats_text += f"🔄 *Недавняя активность:*\n"
-            for session in recent_sessions:
-                time_diff = (datetime.now() - session.last_interaction).seconds // 60
-                stats_text += f"• {session.full_name or 'Пользователь'}: {time_diff} мин назад\n"
+        # Добавляем информацию о статусах
+        if stats['statuses']:
+            stats_text += "📊 *Статусы сессий:*\n"
+            for status, count in stats['statuses'].items():
+                stats_text += f"• {status}: {count}\n"
 
         await update.message.reply_text(
             text=stats_text,
@@ -174,7 +161,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /balance"""
     try:
-        from services.openai_service import openai_service
+        from services.openai_service import OpenAIService
         from config.settings import config
 
         if not config.openai_api_key:
@@ -183,32 +170,12 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Используем глобальный экземпляр сервиса
-        if not openai_service.is_initialized:
-            await update.message.reply_text(
-                "🤖 OpenAI сервис не инициализирован"
-            )
-            return
-
-        # Получаем информацию о балансе (упрощенная версия)
         balance_text = (
             f"💰 *Статус OpenAI*\n\n"
             f"✅ Сервис доступен\n"
             f"🤖 Модель: {config.openai_model}\n"
-            f"🌡️ Температура: {config.openai_temperature}\n\n"
+            f"🔑 API ключ: {'Установлен' if config.openai_api_key else 'Отсутствует'}\n\n"
         )
-
-        # Добавляем статистику использования
-        stats = data_manager.statistics
-        if hasattr(stats, 'openai_requests') and stats.openai_requests > 0:
-            balance_text += (
-                f"📊 *Использование:*\n"
-                f"• Запросов: {stats.openai_requests}\n"
-                f"• Токенов: {stats.openai_tokens:,}\n"
-                f"• Стоимость: ${stats.openai_cost:.4f}"
-            )
-        else:
-            balance_text += "📊 *Использование:* пока нет запросов"
 
         await update.message.reply_text(
             text=balance_text,
@@ -244,7 +211,7 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔄 *Перезапуск анкеты*\n\n"
             f"Вы уверены, что хотите начать анкету заново?\n\n"
             f"📋 *Текущий прогресс:*\n"
-            f"• Вопросов пройдено: {session.current_question}/35\n"
+            f"• Вопросов пройдено: {session.current_question or 0}/35\n"
             f"• Ответов сохранено: {len(session.answers)}\n\n"
             f"⚠️ *Внимание:* Все ваши текущие ответы будут удалены!"
         )
@@ -283,8 +250,8 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             continue_text = (
                 f"📊 *Продолжить анкету?*\n\n"
                 f"У вас есть незавершенная анкета:\n"
-                f"• Пройдено вопросов: {session.current_question}/35\n"
-                f"• Состояние: {session.state.value}\n\n"
+                f"• Пройдено вопросов: {session.current_question or 0}/35\n"
+                f"• Состояние: {session.state.value if session.state else 'неизвестно'}\n\n"
                 f"Хотите продолжить с того же места?"
             )
 
@@ -324,7 +291,7 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
 
         start_text = (
             f"🎯 *Начинаем анкету!*\n\n"
-            f"Всего вопросов: 35\n"
+            f"Всего вопросов: {len(config.questions)}\n"
             f"Примерное время: 10-15 минут\n\n"
             f"📋 *Типы вопросов:*\n"
             f"• 📝 Текстовые ответы\n"
@@ -341,31 +308,21 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="Markdown"
         )
 
-        # Запускаем первый вопрос через QuestionEngine
-        from core.question_engine_v2 import question_engine
-        question = question_engine.get_question_by_index(0)
+        # Получаем первый вопрос
+        question = config.get_question_by_index(0)
         if question:
             from utils.formatters import format_question_text
             question_text = format_question_text(
                 question['text'],
                 user_name,
                 1,
-                35
+                len(config.questions)
             )
 
-            keyboard = question_engine.create_keyboard_for_question(question)
-
-            if keyboard:
-                await update.message.reply_text(
-                    question_text,
-                    parse_mode='Markdown',
-                    reply_markup=keyboard
-                )
-            else:
-                await update.message.reply_text(
-                    question_text,
-                    parse_mode='Markdown'
-                )
+            await update.message.reply_text(
+                question_text,
+                parse_mode='Markdown'
+            )
 
             # Обновляем состояние сессии
             session.state = ConversationState.QUESTIONNAIRE
@@ -421,37 +378,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для отладки (только для разработчиков)"""
-    try:
-        user_id = update.effective_user.id
-
-        debug_info = (
-            f"🐛 *Отладочная информация*\n\n"
-            f"👤 User ID: {user_id}\n"
-            f"📊 Всего сессий: {len(data_manager.sessions)}\n"
-            f"🕒 Время сервера: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            f"📁 Конфигурация:\n"
-        )
-
-        from config.settings import config
-        debug_info += f"• Вопросов: {len(config.questions)}\n"
-        debug_info += f"• Ниш: {len(config.niche_categories)}\n"
-        debug_info += f"• Токен бота: {'Установлен' if config.telegram_token else 'Отсутствует'}\n"
-        debug_info += f"• Токен OpenAI: {'Установлен' if config.openai_api_key else 'Отсутствует'}\n"
-
-        await update.message.reply_text(
-            text=debug_info,
-            parse_mode="Markdown"
-        )
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка в debug_command: {e}")
-        await update.message.reply_text(
-            "🐛 Ошибка при получении отладочной информации"
-        )
-
-
 # Экспортируем все функции для импорта в bot.py
 __all__ = [
     'start_command',
@@ -460,6 +386,5 @@ __all__ = [
     'balance_command',
     'restart_command',
     'questionnaire_command',
-    'status_command',
-    'debug_command'
+    'status_command'
 ]
