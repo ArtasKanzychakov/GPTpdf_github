@@ -21,7 +21,7 @@ from services.data_manager import DataManager
 from services.openai_service import OpenAIService
 from services.niche_generation_detailed import NicheGenerationService
 
-# ✅ ВАЖНО: ПРАВИЛЬНЫЙ ИМПОРТ
+# ✅ ПРАВИЛЬНЫЙ ИМПОРТ
 from core.question_engine_v2 import QuestionEngineV2
 
 logger = logging.getLogger(__name__)
@@ -238,3 +238,46 @@ def build_questionnaire_conversation(handler: QuestionnaireHandler):
         fallbacks=[],
         allow_reentry=False,
     )
+
+
+# =====================================================================
+# 🔌 ADAPTER ДЛЯ core.bot (КРИТИЧЕСКИ ВАЖНО)
+# =====================================================================
+
+_questionnaire_handler: QuestionnaireHandler | None = None
+
+
+def _get_handler(context: ContextTypes.DEFAULT_TYPE) -> QuestionnaireHandler:
+    global _questionnaire_handler
+    if _questionnaire_handler is None:
+        _questionnaire_handler = QuestionnaireHandler(
+            data_manager=context.bot_data["data_manager"],
+            openai_service=context.bot_data["openai_service"],
+            niche_service=context.bot_data["niche_service"],
+            question_engine=context.bot_data["question_engine"],
+        )
+    return _questionnaire_handler
+
+
+async def start_questionnaire(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    handler = _get_handler(context)
+    return await handler.start(update, context)
+
+
+async def handle_question_answer(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    handler = _get_handler(context)
+    return await handler.handle_answer(update, context)
+
+
+async def handle_callback_query(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    handler = _get_handler(context)
+    return await handler.go_back(update, context)
