@@ -56,13 +56,7 @@ class DataManager:
         Returns:
             Новая UserSession
         """
-        session = UserSession(
-            user_id=user_id,
-            status=SessionStatus.STARTED,
-            current_question=1,
-            current_category="demographic",
-            **kwargs
-        )
+        session = UserSession(user_id=user_id)
         
         self.sessions[user_id] = session
         logger.info(f"Создана новая сессия для пользователя {user_id}")
@@ -80,7 +74,7 @@ class DataManager:
             True если успешно
         """
         try:
-            session.update_timestamp()
+            session.touch()
             self.sessions[session.user_id] = session
             logger.debug(f"Сессия сохранена для пользователя {session.user_id}")
             return True
@@ -139,7 +133,7 @@ class DataManager:
             return False
         
         try:
-            session.add_answer(question_id, answer)
+            session.save_answer(question_id, answer)
             self.save_session(session)
             logger.info(f"Ответ сохранен: user={user_id}, question={question_id}")
             return True
@@ -222,10 +216,6 @@ class DataManager:
         
         try:
             session.status = status
-            
-            if status == SessionStatus.COMPLETED:
-                session.completed_at = datetime.now()
-            
             self.save_session(session)
             logger.info(f"Статус обновлен: user={user_id}, status={status.value}")
             return True
@@ -289,9 +279,9 @@ class DataManager:
         
         avg_completion = 0
         if self.sessions:
-            avg_completion = sum(
-                s.get_completion_percentage() for s in self.sessions.values()
-            ) / len(self.sessions)
+            # Считаем среднее количество ответов
+            total_answers = sum(len(s.answers) for s in self.sessions.values())
+            avg_completion = (total_answers / len(self.sessions)) if len(self.sessions) > 0 else 0
         
         return {
             'total_sessions': total,
