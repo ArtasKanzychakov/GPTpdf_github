@@ -1,6 +1,3 @@
-Вы снова скопировали с закрывающими тройными кавычками! Вот **ЧИСТЫЙ КОД БЕЗ РАЗМЕТКИ:**
-
-```
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -30,6 +27,8 @@ from utils.formatters import (
 
 logger = logging.getLogger(__name__)
 
+# Используем глобальный data_manager из services.data_manager
+
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -40,6 +39,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         logger.info(f"🚀 Команда /start от пользователя {user_id} ({user_name})")
 
+        # Создаем или получаем сессию пользователя
         session = data_manager.get_session(user_id)
         if not session:
             session = UserSession(
@@ -56,6 +56,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             data_manager.save_session(session)
             logger.info(f"📝 Обновлена сессия для пользователя {user_id}")
 
+        # Приветственное сообщение
         welcome_text = (
             f"👋 Привет, {user_name}!\n\n"
             f"Добро пожаловать в *Бизнес-Навигатор v7.0* 🚀\n\n"
@@ -75,6 +76,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Просто напиши /questionnaire или нажми кнопку ниже👇"
         )
 
+        # Создаем клавиатуру
         keyboard = [
             [
                 InlineKeyboardButton("📝 Начать анкету", callback_data="start_questionnaire"),
@@ -89,6 +91,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
 
+        # Обновляем состояние сессии
         session.current_state = BotState.START
         data_manager.save_session(session)
 
@@ -145,6 +148,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏱️ Uptime: {stats.get_uptime()}\n\n"
         )
 
+        # Добавляем статистику OpenAI если есть
         if hasattr(stats, 'openai_requests') and stats.openai_requests > 0:
             stats_text += (
                 f"*Использование OpenAI:*\n"
@@ -153,6 +157,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💵 Стоимость: ${stats.openai_cost:.4f}\n\n"
             )
 
+        # Добавляем время последней активности
         if hasattr(data_manager, 'sessions') and data_manager.sessions:
             recent_sessions = list(data_manager.sessions.values())[:3]
             stats_text += f"🔄 *Недавняя активность:*\n"
@@ -184,12 +189,14 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # Используем глобальный экземпляр сервиса
         if not openai_service.is_initialized:
             await update.message.reply_text(
                 "🤖 OpenAI сервис не инициализирован"
             )
             return
 
+        # Получаем информацию о балансе (упрощенная версия)
         balance_text = (
             f"💰 *Статус OpenAI*\n\n"
             f"✅ Сервис доступен\n"
@@ -197,6 +204,7 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🌡️ Температура: {config.openai_temperature}\n\n"
         )
 
+        # Добавляем статистику использования
         stats = data_manager.statistics
         if hasattr(stats, 'openai_requests') and stats.openai_requests > 0:
             balance_text += (
@@ -229,6 +237,7 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = update.effective_user.id
 
+        # Получаем сессию
         session = data_manager.get_session(user_id)
         if not session:
             await update.message.reply_text(
@@ -236,6 +245,7 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+        # Подтверждение перезапуска
         confirm_text = (
             f"🔄 *Перезапуск анкеты*\n\n"
             f"Вы уверены, что хотите начать анкету заново?\n\n"
@@ -268,6 +278,7 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
 
         logger.info(f"📝 Команда /questionnaire от пользователя {user_id}")
 
+        # Получаем или создаем сессию
         session = data_manager.get_session(user_id)
         if not session:
             session = UserSession(
@@ -278,6 +289,7 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             )
             data_manager.save_session(session)
 
+        # Проверяем, есть ли незавершенная анкета
         if session.current_question_index > 0 and session.current_question_index < 35:
             continue_text = (
                 f"📊 *Продолжить анкету?*\n\n"
@@ -302,6 +314,7 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return
 
+        # Начинаем новую анкету
         from config.settings import config
 
         if not config.questions:
@@ -310,6 +323,7 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return
 
+        # Сбрасываем сессию для новой анкеты
         session.current_state = BotState.START
         session.current_question_index = 0
         session.is_completed = False
@@ -341,6 +355,7 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="Markdown"
         )
 
+        # Запускаем первый вопрос через QuestionEngine
         from core.question_engine_v2 import question_engine
         question = question_engine.get_question_by_index(0)
         if question:
@@ -366,6 +381,7 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
                     parse_mode='Markdown'
                 )
 
+            # Обновляем состояние сессии
             session.current_state = BotState.DEMOGRAPHY
             session.current_question_index = 0
             data_manager.save_session(session)
@@ -394,6 +410,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if session.get_all_answers():
             status_text += "\n\n" + format_answer_summary(session.get_all_answers())
 
+        # Добавляем кнопки действий
         keyboard = []
 
         if session.current_state in [BotState.DEMOGRAPHY, BotState.PERSONALITY,
@@ -451,6 +468,7 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+# Экспортируем все функции для импорта в bot.py
 __all__ = [
     'start_command',
     'help_command',
