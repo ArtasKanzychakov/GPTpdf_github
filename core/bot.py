@@ -24,7 +24,8 @@ from handlers.commands import (
     start_command,
     help_command,
     restart_command,
-    status_command
+    status_command,
+    questionnaire_command
 )
 from handlers.questionnaire import (
     start_questionnaire,
@@ -32,6 +33,8 @@ from handlers.questionnaire import (
     handle_callback_query
 )
 from services.data_manager import data_manager
+from core.question_engine_v2 import QuestionEngineV2
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +49,45 @@ class BotStatus:
 class BusinessNavigatorBot:
     """Основной класс бота Бизнес-Навигатор"""
     
-    def __init__(self, config: BotConfig):
+    def __init__(self, config: BotConfig, data_manager_instance, openai_service=None):
         self.config = config
+        self.data_manager = data_manager_instance
+        self.openai_service = openai_service
         self.application: Optional[Application] = None
         self._status = BotStatus()
         self._bot_task: Optional[asyncio.Task] = None
         
+        # Инициализация компонентов
+        self._initialize_components()
+        
+        # Инициализация приложения Telegram
         self._initialize_application()
+    
+    def _initialize_components(self) -> None:
+        """Инициализация всех компонентов бота"""
+        logger.info("🔄 Инициализация компонентов бота...")
+        
+        try:
+            # Инициализация движка вопросов
+            from core.question_engine_v2 import QuestionEngineV2
+            self.question_engine = QuestionEngineV2()
+            logger.info("✅ Движок вопросов инициализирован")
+            
+            # Инициализация сервиса генерации ниш (если есть OpenAI)
+            if self.openai_service:
+                from services.niche_generation_detailed import NicheGenerationService
+                self.niche_service = NicheGenerationService(
+                    client=self.openai_service.client,
+                    model=self.config.openai_model
+                )
+                logger.info("✅ Сервис генерации ниш инициализирован")
+            else:
+                self.niche_service = None
+                logger.info("⚠️ Сервис генерации ниш отключен (нет OpenAI)")
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка инициализации компонентов: {e}")
+            raise
     
     def _initialize_application(self) -> None:
         """Инициализация Telegram Application"""
@@ -66,6 +101,16 @@ class BusinessNavigatorBot:
                 .post_shutdown(self._post_shutdown)
                 .build()
             )
+            
+            # Сохраняем компоненты в bot_data для доступа из handlers
+            self.application.bot_data.update({
+                'config': self.config,
+                'data_manager': self.data_manager,
+                'openai_service': self.openai_service,
+                'niche_service': self.niche_service,
+                'question_engine': self.question_engine,
+                'bot_instance': self
+            })
             
             self._setup_handlers()
             logger.info("✅ Telegram Application инициализирован")
@@ -87,7 +132,7 @@ class BusinessNavigatorBot:
         self.application.add_handler(CommandHandler("help", help_command))
         self.application.add_handler(CommandHandler("restart", restart_command))
         self.application.add_handler(CommandHandler("status", status_command))
-        self.application.add_handler(CommandHandler("questionnaire", start_questionnaire))
+        self.application.add_handler(CommandHandler("questionnaire", questionnaire_command))
         
         # Callback запросы (кнопки)
         self.application.add_handler(CallbackQueryHandler(handle_callback_query))
@@ -106,6 +151,9 @@ class BusinessNavigatorBot:
         """Post-init callback"""
         logger.info("🔄 Post-init выполнен")
         self._status.started_at = datetime.now().timestamp()
+        
+        # Инициализация данных в боте
+        application.bot_data['is_initialized'] = True
     
     async def _post_shutdown(self, application: Application) -> None:
         """Post-shutdown callback"""
@@ -113,15 +161,15 @@ class BusinessNavigatorBot:
         self._status.is_running = False
         
         try:
-            if data_manager:
-                data_manager.cleanup_old_sessions(days=1)
-                logger.info("🧹 Очистка старых сессий выполнена")
+            if self.data_manager:
+                # Можно добавить очистку или сохранение данных
+                logger.info("🧹 Завершение работы менеджера данных...")
         except Exception as e:
-            logger.error(f"❌ Ошибка при очистке сессий: {e}")
+            logger.error(f"❌ Ошибка при завершении работы: {e}")
     
     async def _error_handler(self, update: object, context) -> None:
         """Обработчик ошибок"""
-        logger.error(f"❌ Ошибка: {context.error}")
+        logger.error(f"❌ Ошибка: {context.error}", exc_info=True)
         
         try:
             if update and hasattr(update, 'effective_chat'):
@@ -150,8 +198,8 @@ class BusinessNavigatorBot:
             self._bot_task = asyncio.create_task(self._run_polling())
             
             self._status.is_running = True
-            self._status.total_users = len(data_manager.sessions)
-            self._status.active_sessions = len(data_manager.sessions)
+            self._status.total_users = len(self.data_manager.sessions)
+            self._status.active_sessions = len(self.data_manager.sessions)
             
             logger.info("✅ Бот запущен")
             logger.info(f"📊 Пользователей: {self._status.total_users}")
@@ -166,7 +214,7 @@ class BusinessNavigatorBot:
         try:
             logger.info("📡 Запуск polling...")
             
-            # ВАЖНО: Удаляем webhook перед polling
+            # Удаляем webhook перед polling
             logger.info("🔄 Удаляю webhook...")
             try:
                 await self.application.bot.delete_webhook(drop_pending_updates=True)
@@ -234,7 +282,8 @@ class BusinessNavigatorBot:
             "config": {
                 "bot_name": "Business Navigator",
                 "bot_language": self.config.bot_language,
-                "questions_loaded": len(self.config.questions)
+                "questions_loaded": len(self.config.questions),
+                "openai_available": self.openai_service is not None
             }
         }
     
