@@ -166,6 +166,14 @@ class BusinessNavigatorBot:
         try:
             logger.info("📡 Запуск polling...")
             
+            # ВАЖНО: Удаляем webhook перед polling
+            logger.info("🔄 Удаляю webhook...")
+            try:
+                await self.application.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("✅ Webhook удален")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось удалить webhook: {e}")
+            
             await self.application.start()
             
             await self.application.updater.start_polling(
