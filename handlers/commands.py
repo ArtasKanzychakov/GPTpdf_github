@@ -12,8 +12,8 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackContext
 
-from models.enums import BotState
-from models.session import UserSession
+from models.enums import BotState, ConversationState
+from models.session import UserSession, SessionStatus
 from services.data_manager import data_manager
 from utils.formatters import (
     format_session_summary,
@@ -42,17 +42,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Создаем или получаем сессию пользователя
         session = data_manager.get_session(user_id)
         if not session:
-            session = UserSession(
-                user_id=user_id,
-                username=user_name,
-                full_name=user.full_name or "",
-                created_at=datetime.now()
-            )
+            session = UserSession(user_id=user_id)
             data_manager.save_session(session)
             logger.info(f"📝 Создана новая сессия для пользователя {user_id}")
         else:
-            session.username = user_name
-            session.last_interaction = datetime.now()
+            session.touch()
             data_manager.save_session(session)
             logger.info(f"📝 Обновлена сессия для пользователя {user_id}")
 
@@ -92,7 +86,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         # Обновляем состояние сессии
-        session.current_state = BotState.START
+        session.state = ConversationState.START
         data_manager.save_session(session)
 
     except Exception as e:
@@ -250,8 +244,8 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔄 *Перезапуск анкеты*\n\n"
             f"Вы уверены, что хотите начать анкету заново?\n\n"
             f"📋 *Текущий прогресс:*\n"
-            f"• Вопросов пройдено: {session.current_question_index}/35\n"
-            f"• Ответов сохранено: {len(session.get_all_answers())}\n\n"
+            f"• Вопросов пройдено: {session.current_question}/35\n"
+            f"• Ответов сохранено: {len(session.answers)}\n\n"
             f"⚠️ *Внимание:* Все ваши текущие ответы будут удалены!"
         )
 
@@ -281,21 +275,16 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
         # Получаем или создаем сессию
         session = data_manager.get_session(user_id)
         if not session:
-            session = UserSession(
-                user_id=user_id,
-                username=update.effective_user.username or "",
-                full_name=user_name,
-                created_at=datetime.now()
-            )
+            session = UserSession(user_id=user_id)
             data_manager.save_session(session)
 
         # Проверяем, есть ли незавершенная анкета
-        if session.current_question_index > 0 and session.current_question_index < 35:
+        if session.current_question > 0 and session.current_question < 35:
             continue_text = (
                 f"📊 *Продолжить анкету?*\n\n"
                 f"У вас есть незавершенная анкета:\n"
-                f"• Пройдено вопросов: {session.current_question_index}/35\n"
-                f"• Состояние: {session.current_state.name}\n\n"
+                f"• Пройдено вопросов: {session.current_question}/35\n"
+                f"• Состояние: {session.state.value}\n\n"
                 f"Хотите продолжить с того же места?"
             )
 
@@ -324,16 +313,13 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         # Сбрасываем сессию для новой анкеты
-        session.current_state = BotState.START
-        session.current_question_index = 0
-        session.is_completed = False
-        session.completion_date = None
-        session.analysis_result = ""
-        session.suggested_niches = []
-        session.selected_niche = None
-        session.detailed_plan = ""
-
-        session.last_interaction = datetime.now()
+        session.state = ConversationState.START
+        session.current_question = 0
+        session.status = SessionStatus.NEW
+        session.answers.clear()
+        session.psychological_analysis = None
+        session.niches.clear()
+        session.touch()
         data_manager.save_session(session)
 
         start_text = (
@@ -382,8 +368,8 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
                 )
 
             # Обновляем состояние сессии
-            session.current_state = BotState.DEMOGRAPHY
-            session.current_question_index = 0
+            session.state = ConversationState.QUESTIONNAIRE
+            session.current_question = 0
             data_manager.save_session(session)
 
     except Exception as e:
@@ -407,17 +393,15 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         status_text = format_session_summary(session)
 
-        if session.get_all_answers():
-            status_text += "\n\n" + format_answer_summary(session.get_all_answers())
+        if session.answers:
+            status_text += "\n\n" + format_answer_summary(session.answers)
 
-        # Добавляем кнопки действий
         keyboard = []
 
-        if session.current_state in [BotState.DEMOGRAPHY, BotState.PERSONALITY,
-                                      BotState.SKILLS, BotState.VALUES, BotState.LIMITATIONS]:
+        if session.state in [ConversationState.QUESTIONNAIRE, ConversationState.START]:
             keyboard.append([InlineKeyboardButton("▶️ Продолжить анкету", callback_data="continue_questionnaire")])
 
-        if session.get_all_answers():
+        if session.answers:
             keyboard.append([InlineKeyboardButton("📊 Показать ответы", callback_data="show_answers")])
 
         keyboard.append([InlineKeyboardButton("🔄 Начать заново", callback_data="restart_confirm")])
