@@ -62,7 +62,13 @@ async def start_questionnaire(
         data_manager.save_session(session)
 
         # Получаем первый вопрос
-        questions = context.bot_data.get('config', {}).get('questions', [])
+        config = context.bot_data.get('config')
+        if not config or not hasattr(config, 'questions'):
+            await update.message.reply_text("❌ Ошибка: вопросы не загружены")
+            return ConversationHandler.END
+
+        questions = config.questions
+        
         if not questions:
             await update.message.reply_text("❌ Ошибка: вопросы не загружены")
             return ConversationHandler.END
@@ -70,7 +76,7 @@ async def start_questionnaire(
         # Находим первый вопрос (id=1)
         first_question = None
         for q in questions:
-            if q.get('id') == 1:
+            if str(q.get('id')) == '1':
                 first_question = q
                 break
 
@@ -164,8 +170,13 @@ async def handle_question_answer(
         logger.info(f"📝 Ответ сохранен: user={user_id}, question={current_question_id}, answer={answer}")
 
         # Получаем следующий вопрос
-        config = context.bot_data.get('config', {})
-        questions = config.get('questions', [])
+        config = context.bot_data.get('config')
+        
+        if not config or not hasattr(config, 'questions'):
+            await _send_error(update, "Вопросы не загружены")
+            return ConversationHandler.END
+            
+        questions = config.questions
         
         next_question = _get_next_question(questions, current_question_id)
         
@@ -276,14 +287,19 @@ async def _handle_back_button(
         current_question_id = context.user_data.get('question_id', 1)
         
         # Находим предыдущий вопрос
-        config = context.bot_data.get('config', {})
-        questions = config.get('questions', [])
+        config = context.bot_data.get('config')
+        
+        if not config or not hasattr(config, 'questions'):
+            await query.edit_message_text("❌ Вопросы не загружены")
+            return QUESTIONNAIRE
+            
+        questions = config.questions
         
         prev_question = None
         prev_id = None
         
         for i, q in enumerate(questions):
-            if q.get('id') == current_question_id and i > 0:
+            if str(q.get('id')) == str(current_question_id) and i > 0:
                 prev_question = questions[i-1]
                 prev_id = prev_question.get('id')
                 break
@@ -467,7 +483,7 @@ def _get_next_question(questions: list, current_id: int) -> dict:
     Получение следующего вопроса
     """
     for i, q in enumerate(questions):
-        if q.get('id') == current_id and i < len(questions) - 1:
+        if str(q.get('id')) == str(current_id) and i < len(questions) - 1:
             return questions[i + 1]
     return None
 
@@ -481,28 +497,3 @@ async def _send_error(update: Update, message: str):
             await update.message.reply_text(f"❌ {message}")
     except:
         pass
-
-
-# ConversationHandler для анкеты
-def build_questionnaire_conversation():
-    """
-    Создание ConversationHandler для анкеты
-    """
-    return ConversationHandler(
-        entry_points=[
-            CommandHandler("questionnaire", start_questionnaire),
-            MessageHandler(filters.Regex(r'^📝 Начать анкету$'), start_questionnaire)
-        ],
-        states={
-            QUESTIONNAIRE: [
-                CallbackQueryHandler(handle_callback_query),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_question_answer)
-            ],
-        },
-        fallbacks=[
-            CommandHandler("start", start_questionnaire),
-            CommandHandler("help", lambda u, c: u.message.reply_text("Используйте /start для начала")),
-            CommandHandler("cancel", lambda u, c: ConversationHandler.END)
-        ],
-        allow_reentry=True
-    )
