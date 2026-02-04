@@ -84,7 +84,6 @@ async def lifespan(app: FastAPI):
     try:
         from config.settings import BotConfig
         from core.bot import BusinessNavigatorBot
-        from services.data_manager import DataManager
         
         # Загрузка конфигурации
         logger.info("⚙️ Загружаю конфигурацию...")
@@ -100,10 +99,9 @@ async def lifespan(app: FastAPI):
         logger.info(f"🤖 OpenAI модель: {config.openai_model}")
         logger.info(f"📝 Вопросов загружено: {len(config.questions)}")
         
-        # Инициализация менеджера данных
-        global data_manager
-        data_manager = DataManager()
-        data_manager.initialize()
+        # Инициализация менеджера данных (используем глобальный экземпляр)
+        from services.data_manager import data_manager as global_data_manager
+        global_data_manager.initialize()
         logger.info("💾 Менеджер данных инициализирован")
         
         # Проверка OpenAI
@@ -126,7 +124,7 @@ async def lifespan(app: FastAPI):
         
         # Создание и запуск бота
         logger.info("🤖 Создаю экземпляр бота...")
-        bot = BusinessNavigatorBot(config, data_manager, openai_service)
+        bot = BusinessNavigatorBot(config, global_data_manager, openai_service)
         bot_instance = bot
         application = bot.application
         
