@@ -103,18 +103,20 @@ async def lifespan(app: FastAPI):
         # Инициализация менеджера данных
         global data_manager
         data_manager = DataManager()
+        data_manager.initialize()
         logger.info("💾 Менеджер данных инициализирован")
         
         # Проверка OpenAI
+        openai_service = None
         if config.openai_api_key:
             logger.info("🔍 Проверяем подключение к OpenAI...")
             try:
+                from openai import AsyncOpenAI
                 from services.openai_service import OpenAIService
-                openai_service = OpenAIService()
-                if openai_service.is_initialized:
-                    logger.info("✅ OpenAI клиент инициализирован")
-                else:
-                    logger.warning("⚠️ OpenAI клиент не инициализирован")
+                
+                openai_client = AsyncOpenAI(api_key=config.openai_api_key)
+                openai_service = OpenAIService(client=openai_client, model=config.openai_model)
+                logger.info("✅ OpenAI клиент инициализирован")
             except Exception as e:
                 logger.warning(f"⚠️ Ошибка при проверке OpenAI: {e}")
         else:
@@ -124,7 +126,7 @@ async def lifespan(app: FastAPI):
         
         # Создание и запуск бота
         logger.info("🤖 Создаю экземпляр бота...")
-        bot = BusinessNavigatorBot(config)
+        bot = BusinessNavigatorBot(config, data_manager, openai_service)
         bot_instance = bot
         application = bot.application
         
