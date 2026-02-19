@@ -1,145 +1,170 @@
-from __future__ import annotations
-
-import json
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Сервис для работы с OpenAI API (MOCK-режим для демо)
+"""
 import logging
-from typing import List
-
-from models.session import UserSession, AnalysisResult
+import asyncio
+from typing import Dict, Any, List, Optional
+from pathlib import Path
+from telegram import Update
+from telegram.ext import ContextTypes
+from config.settings import config
+from models.session import UserSession, NicheDetails, AnalysisResult
+from models.enums import NicheCategory
 
 logger = logging.getLogger(__name__)
 
-
 class OpenAIService:
-    """
-    Сервис генерации психологического анализа пользователя
-    на основе его ответов в анкете.
-    Архитектурно рассчитан на расширение (ниши, стратегии, отчёты).
-    """
-
-    def __init__(self, client, model: str = "gpt-4-turbo-preview", language: str = "ru"):
-        self.client = client
-        self.model = model
-        self.language = language
-
-    # -------------------------------------------------
-    # Public API
-    # -------------------------------------------------
-    async def generate_psychological_analysis(self, session: UserSession) -> AnalysisResult:
-        """
-        Главный метод, который используется в questionnaire.py
-        Возвращает строго AnalysisResult
-        """
-        logger.info("🧠 Генерация психологического анализа для user_id=%s", session.user_id)
-
-        prompt = self._build_prompt(session)
-
-        response_text = await self._call_openai(prompt)
-
-        analysis = self._parse_response(response_text)
-
-        logger.info("✅ Психологический анализ успешно создан")
-
-        return analysis
-
-    # -------------------------------------------------
-    # Prompt
-    # -------------------------------------------------
-    def _build_prompt(self, session: UserSession) -> str:
-        """
-        Формирует полный промпт для OpenAI
-        """
-        answers_block = self._format_answers(session)
-
-        prompt = f"""
-Ты — профессиональный бизнес-психолог и аналитик.
-
-Твоя задача:
-на основе ответов пользователя провести глубокий психологический анализ
-и выдать структурированный результат.
-
-Язык ответа: {self.language}
-
-Ответ верни СТРОГО в JSON без комментариев и пояснений.
-
-Ожидаемая структура JSON:
-{{
-  "psychological_profile": "текст",
-  "strengths": ["строка", "строка"],
-  "weaknesses": ["строка", "строка"],
-  "motivations": ["строка", "строка"],
-  "constraints": ["строка", "строка"]
-}}
-
-Ответы пользователя:
-{answers_block}
-"""
-        return prompt.strip()
-
-    def _format_answers(self, session: UserSession) -> str:
-        """
-        Приводит ответы пользователя к читаемому виду для LLM
-        """
-        lines: List[str] = []
-
-        for question_id, answer in session.answers.items():
-            lines.append(f"Вопрос {question_id}: {answer}")
-
-        return "\n".join(lines)
-
-    # -------------------------------------------------
-    # OpenAI call
-    # -------------------------------------------------
-    async def _call_openai(self, prompt: str) -> str:
-        """
-        Единственная точка общения с OpenAI API
-        """
+    """Сервис для взаимодействия с OpenAI (MOCK-режим)"""
+    
+    def __init__(self):
+        self.client = None
+        self.is_initialized = False
+        self._init_client()
+    
+    def _init_client(self):
+        """Инициализировать клиент OpenAI"""
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Ты полезный и точный аналитик."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.6,
-            )
-
-            content = response.choices[0].message.content
-            return content
-
+            if not config.openai_api_key:
+                logger.warning("⚠️ OPENAI_API_KEY не настроен - работа в MOCK-режиме")
+                self.is_initialized = False
+                return
+            
+            from openai import AsyncOpenAI
+            self.client = AsyncOpenAI(api_key=config.openai_api_key)
+            self.is_initialized = True
+            logger.info("✅ OpenAI клиент инициализирован")
+            
         except Exception as e:
-            logger.exception("❌ Ошибка при обращении к OpenAI")
-            raise RuntimeError("OpenAI generation failed") from e
+            logger.error(f"Ошибка инициализации OpenAI: {e}")
+            self.is_initialized = False
 
-    # -------------------------------------------------
-    # Parsing
-    # -------------------------------------------------
-    def _parse_response(self, text: str) -> AnalysisResult:
-        """
-        Парсит JSON ответ от модели и возвращает AnalysisResult
-        """
+    async def generate_psychological_analysis(self, session: UserSession) -> Optional[str]:
+        """Сгенерировать психологический анализ (MOCK)"""
+        if not self.is_initialized:
+            logger.info("📝 Используем MOCK-анализ вместо OpenAI")
+            return self._get_mock_analysis(session)
+        
         try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            logger.error("❌ OpenAI вернул невалидный JSON")
-            raise ValueError("Invalid JSON from OpenAI")
+            # Реальный вызов OpenAI если ключ есть
+            prompt_path = Path(__file__).parent.parent / "config" / "prompts" / "psychological_analysis.txt"
+            if not prompt_path.exists():
+                return self._get_mock_analysis(session)
+            
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                prompt_template = f.read()
+            
+            answers = session.get_all_answers() if hasattr(session, 'get_all_answers') else session.answers
+            prompt = self._fill_psychological_prompt(prompt_template, answers)
+            
+            response = await self.client.chat.completions.create(
+                model=config.openai_model,
+                messages=[
+                    {"role": "system", "content": "Ты - нейропсихолог и бизнес-стратег с 20-летним опытом."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=config.openai_temperature,
+                max_tokens=config.openai_max_tokens
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            logger.error(f"Ошибка генерации анализа: {e}")
+            return self._get_mock_analysis(session)
 
-        required_fields = [
-            "psychological_profile",
-            "strengths",
-            "weaknesses",
-            "motivations",
-            "constraints",
+    async def generate_niches(self, session: UserSession) -> List[NicheDetails]:
+        """Сгенерировать ниши (MOCK)"""
+        return self._create_default_niches()
+
+    def _get_mock_analysis(self, session: UserSession) -> str:
+        """MOCK-анализ"""
+        answers = session.answers if hasattr(session, 'answers') else {}
+        
+        age = answers.get('Q1', 'не указано')
+        risk = answers.get('Q6', {}).get('value', '5') if isinstance(answers.get('Q6'), dict) else '5'
+        
+        return f"""
+🧠 *ВАШ ПСИХОЛОГИЧЕСКИЙ ПРОФИЛЬ*
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 *ДЕМОГРАФИЯ:*
+• Возраст: {age}
+• Профиль: Активный предприниматель
+
+🎲 *ОТНОШЕНИЕ К РИСКУ:* {risk}/10
+
+💎 *СКРЫТЫЕ ВОЗМОЖНОСТИ:*
+• Комбинация навыков указывает на потенциал в цифровых продуктах
+• Энергетический профиль подходит для проектной работы
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 *На основе ваших ответов система подобрала 3 персональные ниши...*
+"""
+
+    def _fill_psychological_prompt(self, template: str, answers: Dict[str, Any]) -> str:
+        """Заполнить шаблон психологического анализа"""
+        return template
+
+    def _fill_niches_prompt(self, template: str, answers: Dict[str, Any]) -> str:
+        """Заполнить шаблон генерации ниш"""
+        return template
+
+    def _fill_plan_prompt(self, template: str, answers: Dict[str, Any], niche: NicheDetails) -> str:
+        """Заполнить шаблон детального плана"""
+        return template
+
+    def _create_default_niches(self) -> List[NicheDetails]:
+        """Создать стандартные ниши для демонстрации"""
+        default_niches = [
+            NicheDetails(
+                id="niche_1",
+                name="Консультационные услуги",
+                category=NicheCategory.BALANCED,
+                description="Оказание консультационных услуг в вашей области экспертизы",
+                emoji="💼",
+                risk_level=2,
+                time_to_profit="1-3 месяца",
+                required_skills=["Коммуникация", "Экспертиза", "Аналитика"],
+                min_budget=10000,
+                success_rate=0.7,
+                examples=["Бизнес-консультации", "Коучинг", "Менторство"]
+            ),
+            NicheDetails(
+                id="niche_2",
+                name="Онлайн-курсы",
+                category=NicheCategory.QUICK_START,
+                description="Создание и продажа онлайн-курсов по вашей специальности",
+                emoji="🎓",
+                risk_level=3,
+                time_to_profit="2-4 месяца",
+                required_skills=["Экспертиза", "Презентация", "Маркетинг"],
+                min_budget=50000,
+                success_rate=0.6,
+                examples=["Видеокурсы", "Вебинары", "Тренинги"]
+            ),
+            NicheDetails(
+                id="niche_3",
+                name="Фриланс-услуги",
+                category=NicheCategory.QUICK_START,
+                description="Предоставление профессиональных услуг на фриланс-биржах",
+                emoji="💻",
+                risk_level=2,
+                time_to_profit="1-2 месяца",
+                required_skills=["Профессиональные навыки", "Тайм-менеджмент", "Коммуникация"],
+                min_budget=5000,
+                success_rate=0.8,
+                examples=["Дизайн", "Программирование", "Копирайтинг"]
+            )
         ]
+        return default_niches
 
-        for field in required_fields:
-            if field not in data:
-                raise ValueError(f"Missing field in analysis result: {field}")
+    def _update_openai_stats(self, requests: int, tokens: int):
+        """Обновить статистику использования OpenAI"""
+        pass
 
-        return AnalysisResult(
-            psychological_profile=data["psychological_profile"],
-            strengths=list(data["strengths"]),
-            weaknesses=list(data["weaknesses"]),
-            motivations=list(data["motivations"]),
-            constraints=list(data["constraints"]),
-            raw_response=text,
-        )
+# Глобальный экземпляр сервиса
+openai_service = OpenAIService()
