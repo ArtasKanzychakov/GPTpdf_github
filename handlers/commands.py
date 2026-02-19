@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 Обработчики команд бота
 """
-
 import logging
+import asyncio
 from typing import Dict, Any, Optional
 from datetime import datetime
-
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackContext
-
-from models.enums import BotState, ConversationState
-from models.session import UserSession, SessionStatus
+from telegram.constants import ChatAction
+from models.enums import BotState
+from models.session import UserSession
 from services.data_manager import data_manager
 from utils.formatters import (
     format_session_summary,
@@ -27,234 +25,237 @@ from utils.formatters import (
 
 logger = logging.getLogger(__name__)
 
-# Глобальный data_manager используется напрямую
-
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     try:
         user = update.effective_user
         user_id = user.id
         user_name = user.first_name or "Пользователь"
-
+        
         logger.info(f"🚀 Команда /start от пользователя {user_id} ({user_name})")
-
+        
+        # Показываем "бот печатает"
+        await context.bot.send_chat_action(
+            chat_id=user_id,
+            action=ChatAction.TYPING
+        )
+        await asyncio.sleep(1.5)  # Небольшая задержка для эффекта
+        
         # Создаем или получаем сессию пользователя
         session = data_manager.get_session(user_id)
         if not session:
-            session = UserSession(user_id=user_id)
+            session = UserSession(
+                user_id=user_id,
+                username=user_name,
+                full_name=user.full_name or "",
+                created_at=datetime.now()
+            )
             data_manager.save_session(session)
             logger.info(f"📝 Создана новая сессия для пользователя {user_id}")
         else:
-            session.touch()
+            session.username = user_name
+            session.last_interaction = datetime.now()
             data_manager.save_session(session)
             logger.info(f"📝 Обновлена сессия для пользователя {user_id}")
+        
+        # 🎨 КРАСИВОЕ ПРИВЕТСТВИЕ
+        welcome_text = f"""
+✨ *ДОБРО ПОЖАЛОВАТЬ, {user_name.upper()}!* ✨
 
-        # Приветственное сообщение
-        welcome_text = (
-            f"👋 Привет, {user_name}!\n\n"
-            f"Добро пожаловать в *Бизнес-Навигатор v7.0* 🚀\n\n"
-            f"Я помогу тебе найти идеальную бизнес-нишу на основе твоей личности, "
-            f"навыков и целей.\n\n"
-            f"🔍 *Что я делаю:*\n"
-            f"• Проведу глубокий психологический анализ\n"
-            f"• Подберу подходящие бизнес-ниши\n"
-            f"• Создам детальный план действий\n"
-            f"• Помогу избежать типичных ошибок\n\n"
-            f"📊 *Как это работает:*\n"
-            f"1. Пройди анкету из 35 вопросов\n"
-            f"2. Получи психологический анализ\n"
-            f"3. Выбери подходящие ниши\n"
-            f"4. Получи детальный план действий\n\n"
-            f"🚀 *Начнем?*\n"
-            f"Просто напиши /questionnaire или нажми кнопку ниже👇"
-        )
+🚀 *БИЗНЕС-НАВИГАТОР v7.0*
+_Интеллектуальная система подбора бизнес-ниш_
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 *Что вас ждёт:*
+
+🧠 Глубокий психологический анализ
+💼 Персональные бизнес-ниши
+📋 Детальный план действий
+⚡ UX-интерфейс нового поколения
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 *Как это работает:*
+1️⃣ Пройдите интерактивную анкету
+2️⃣ Получите психологический профиль
+3️⃣ Выберите подходящие ниши
+4️⃣ Скачайте план действий
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💎 *Это демо-версия* для демонстрации
+технологии UX-взаимодействия.
+
+🚀 *Готовы начать путешествие?*
+"""
+        
         # Создаем клавиатуру
         keyboard = [
             [
                 InlineKeyboardButton("📝 Начать анкету", callback_data="start_questionnaire"),
-                InlineKeyboardButton("ℹ️ Помощь", callback_data="help_info")
+                InlineKeyboardButton("ℹ️ О проекте", callback_data="about_project")
+            ],
+            [
+                InlineKeyboardButton("📊 Статистика", callback_data="stats_info"),
+                InlineKeyboardButton("❓ Помощь", callback_data="help_info")
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-
+        
         await update.message.reply_text(
             text=welcome_text,
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
-
+        
         # Обновляем состояние сессии
-        session.state = ConversationState.START
+        session.current_state = BotState.START
         data_manager.save_session(session)
-
+        
     except Exception as e:
         logger.error(f"❌ Ошибка в start_command: {e}", exc_info=True)
         await update.message.reply_text(
             "❌ Произошла ошибка при запуске бота. Попробуйте позже."
         )
 
-
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команда /help"""
-    help_text = (
-        "📚 Помощь по Бизнес-Навигатору v7.0\n\n"
-        "🤖 Доступные команды:\n"
-        "• /start - Запустить бота\n"
-        "• /help - Эта справка\n"
-        "• /questionnaire - Начать анкету\n"
-        "• /stats - Статистика бота\n"
-        "• /balance - Проверить баланс OpenAI\n"
-        "• /restart - Начать заново\n\n"
-        "📊 Процесс работы:\n"
-        "1. Пройдите анкету (35 вопросов)\n"
-        "2. Получите психологический анализ\n"
-        "3. Выберите подходящие ниши\n"
-        "4. Получите детальный план\n\n"
-        "❓ Частые вопросы:\n"
-        "• Анкета сохраняет прогресс\n"
-        "• Можно прервать и продолжить позже\n"
-        "• Все данные конфиденциальны\n"
-        "• Анализ занимает 1-2 минуты\n\n"
-        "📞 Поддержка:\n"
-        "По вопросам работы бота обращайтесь к разработчику."
+    """Обработчик команды /help"""
+    await context.bot.send_chat_action(
+        chat_id=update.effective_user.id,
+        action=ChatAction.TYPING
     )
+    
+    help_text = """
+📚 *ПОМОЩЬ | БИЗНЕС-НАВИГАТОР v7.0*
 
+🤖 *Доступные команды:*
+• /start - Запустить бота заново
+• /help - Эта справка
+• /questionnaire - Начать анкету
+• /status - Проверить прогресс
+• /restart - Начать заново
+
+📊 *Процесс работы:*
+1. Пройдите анкету (7 вопросов)
+2. Получите психологический анализ
+3. Выберите подходящие ниши
+4. Получите детальный план
+
+⏱️ *Время прохождения:* 3-5 минут
+💾 *Прогресс сохраняется* автоматически
+
+🔒 *Конфиденциальность:*
+Все данные обрабатываются локально
+и не передаются третьим лицам.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 *Совет:* Отвечайте честно — это
+важно для точности рекомендаций!
+"""
     await update.message.reply_text(
         text=help_text,
         parse_mode="Markdown"
     )
 
-
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /stats"""
+    await context.bot.send_chat_action(
+        chat_id=update.effective_user.id,
+        action=ChatAction.TYPING
+    )
+    
     try:
-        stats = data_manager.get_session_statistics()
+        stats = data_manager.statistics
+        stats_text = f"""
+📊 *СТАТИСТИКА БИЗНЕС-НАВИГАТОРА v7.0*
 
-        stats_text = (
-            f"📊 *Статистика Бизнес-Навигатора v7.0*\n\n"
-            f"👥 Всего сессий: {stats['total_sessions']}\n"
-            f"✅ Завершено: {stats['completed']}\n"
-            f"🔄 В процессе: {stats['in_progress']}\n"
-            f"📈 Средний прогресс: {stats['average_completion']} вопросов\n\n"
-        )
-
-        # Добавляем информацию о статусах
-        if stats['statuses']:
-            stats_text += "📊 *Статусы сессий:*\n"
-            for status, count in stats['statuses'].items():
-                stats_text += f"• {status}: {count}\n"
-
+👥 Пользователей: {stats.total_users}
+📋 Сессий: {stats.total_sessions}
+✅ Завершено: {stats.completed_sessions}
+💬 Сообщений: {stats.total_messages}
+⚡ Активных: {stats.active_sessions}
+⏱️ Uptime: {stats.get_uptime()}
+"""
         await update.message.reply_text(
             text=stats_text,
             parse_mode="Markdown"
         )
-
     except Exception as e:
         logger.error(f"❌ Ошибка в stats_command: {e}")
-        await update.message.reply_text(
-            "📊 Статистика временно недоступна"
-        )
-
-
-async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /balance"""
-    try:
-        from services.openai_service import OpenAIService
-        from config.settings import config
-
-        if not config.openai_api_key:
-            await update.message.reply_text(
-                "🤖 OpenAI отключен. Работаем в базовом режиме."
-            )
-            return
-
-        balance_text = (
-            f"💰 *Статус OpenAI*\n\n"
-            f"✅ Сервис доступен\n"
-            f"🤖 Модель: {config.openai_model}\n"
-            f"🔑 API ключ: {'Установлен' if config.openai_api_key else 'Отсутствует'}\n\n"
-        )
-
-        await update.message.reply_text(
-            text=balance_text,
-            parse_mode="Markdown"
-        )
-
-    except ImportError:
-        await update.message.reply_text(
-            "🤖 Модуль OpenAI не настроен"
-        )
-    except Exception as e:
-        logger.error(f"❌ Ошибка в balance_command: {e}")
-        await update.message.reply_text(
-            "💰 Не удалось получить информацию о балансе"
-        )
-
+        await update.message.reply_text("📊 Статистика временно недоступна")
 
 async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /restart"""
+    await context.bot.send_chat_action(
+        chat_id=update.effective_user.id,
+        action=ChatAction.TYPING
+    )
+    
     try:
         user_id = update.effective_user.id
-
-        # Получаем сессию
         session = data_manager.get_session(user_id)
+        
         if not session:
             await update.message.reply_text(
                 "У вас нет активной сессии. Используйте /start для начала работы."
             )
             return
+        
+        confirm_text = f"""
+🔄 *ПЕРезапуск анкеты*
 
-        # Подтверждение перезапуска
-        confirm_text = (
-            f"🔄 *Перезапуск анкеты*\n\n"
-            f"Вы уверены, что хотите начать анкету заново?\n\n"
-            f"📋 *Текущий прогресс:*\n"
-            f"• Вопросов пройдено: {session.current_question or 0}/35\n"
-            f"• Ответов сохранено: {len(session.answers)}\n\n"
-            f"⚠️ *Внимание:* Все ваши текущие ответы будут удалены!"
-        )
+Вы уверены, что хотите начать заново?
 
+📋 *Текущий прогресс:*
+• Вопросов пройдено: {session.current_question_index}/7
+• Ответов сохранено: {len(session.get_all_answers())}
+
+⚠️ *Внимание:* Все текущие ответы будут удалены!
+"""
         reply_markup = create_restart_keyboard()
-
         await update.message.reply_text(
             text=confirm_text,
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
-
     except Exception as e:
         logger.error(f"❌ Ошибка в restart_command: {e}")
-        await update.message.reply_text(
-            "❌ Произошла ошибка при попытке перезапуска"
-        )
-
+        await update.message.reply_text("❌ Произошла ошибка при попытке перезапуска")
 
 async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /questionnaire"""
+    await context.bot.send_chat_action(
+        chat_id=update.effective_user.id,
+        action=ChatAction.TYPING
+    )
+    
     try:
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or "Пользователь"
-
+        
         logger.info(f"📝 Команда /questionnaire от пользователя {user_id}")
-
-        # Получаем или создаем сессию
+        
         session = data_manager.get_session(user_id)
         if not session:
-            session = UserSession(user_id=user_id)
-            data_manager.save_session(session)
-
-        # Проверяем, есть ли незавершенная анкета
-        if session.current_question > 0 and session.current_question < 35:
-            continue_text = (
-                f"📊 *Продолжить анкету?*\n\n"
-                f"У вас есть незавершенная анкета:\n"
-                f"• Пройдено вопросов: {session.current_question or 0}/35\n"
-                f"• Состояние: {session.state.value if session.state else 'неизвестно'}\n\n"
-                f"Хотите продолжить с того же места?"
+            session = UserSession(
+                user_id=user_id,
+                username=update.effective_user.username or "",
+                full_name=user_name,
+                created_at=datetime.now()
             )
+            data_manager.save_session(session)
+        
+        # Проверяем, есть ли незавершенная анкета
+        if session.current_question_index > 0 and session.current_question_index < 7:
+            continue_text = f"""
+📊 *ПРОДОЛЖИТЬ АНКЕТУ?*
 
+У вас есть незавершенная анкета:
+• Пройдено вопросов: {session.current_question_index}/7
+• Состояние: {session.current_state.name}
+
+Хотите продолжить с того же места?
+"""
             keyboard = [
                 [
                     InlineKeyboardButton("✅ Продолжить", callback_data="continue_questionnaire"),
@@ -262,129 +263,175 @@ async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TY
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-
             await update.message.reply_text(
                 text=continue_text,
                 parse_mode="Markdown",
                 reply_markup=reply_markup
             )
             return
-
+        
         # Начинаем новую анкету
         from config.settings import config
-
         if not config.questions:
             await update.message.reply_text(
                 "❌ Вопросы не загружены. Обратитесь к администратору."
             )
             return
-
+        
         # Сбрасываем сессию для новой анкеты
-        session.state = ConversationState.START
-        session.current_question = 0
-        session.status = SessionStatus.NEW
-        session.answers.clear()
-        session.psychological_analysis = None
-        session.niches.clear()
-        session.touch()
+        session.current_state = BotState.START
+        session.current_question_index = 0
+        session.is_completed = False
+        session.completion_date = None
+        session.analysis_result = ""
+        session.suggested_niches = []
+        session.selected_niche = None
+        session.detailed_plan = ""
+        session.last_interaction = datetime.now()
         data_manager.save_session(session)
+        
+        start_text = f"""
+🎯 *НАЧИНАЕМ АНКЕТУ!*
 
-        start_text = (
-            f"🎯 *Начинаем анкету!*\n\n"
-            f"Всего вопросов: {len(config.questions)}\n"
-            f"Примерное время: 10-15 минут\n\n"
-            f"📋 *Типы вопросов:*\n"
-            f"• 📝 Текстовые ответы\n"
-            f"• 🔘 Выбор из вариантов\n"
-            f"• ☑️ Множественный выбор\n"
-            f"• 🎚️ Слайдеры (оценки)\n\n"
-            f"💡 *Совет:*\n"
-            f"Отвечайте честно — это важно для точного анализа!\n\n"
-            f"🚀 *Первый вопрос:*"
-        )
+📋 Всего вопросов: *7*
+⏱️ Примерное время: *3-5 минут*
 
+💡 *Типы вопросов:*
+• 🔘 Выбор из вариантов
+• ☑️ Множественный выбор
+• 🎚️ Интерактивные слайдеры
+• ⭐ Звёздный рейтинг
+
+✨ *Совет:* Отвечайте честно — это
+важно для точного анализа!
+
+🚀 *Первый вопрос:*
+"""
         await update.message.reply_text(
             text=start_text,
             parse_mode="Markdown"
         )
-
-        # Получаем первый вопрос
-        question = config.get_question_by_index(0)
+        
+        # Запускаем первый вопрос через QuestionEngine
+        from core.question_engine import question_engine
+        question = question_engine.get_question_by_index(0)
+        
         if question:
             from utils.formatters import format_question_text
             question_text = format_question_text(
                 question['text'],
                 user_name,
                 1,
-                len(config.questions)
+                7
             )
-
-            await update.message.reply_text(
-                question_text,
-                parse_mode='Markdown'
+            keyboard = question_engine.create_keyboard_for_question(question)
+            
+            # Показываем "бот печатает" перед вопросом
+            await context.bot.send_chat_action(
+                chat_id=user_id,
+                action=ChatAction.TYPING
             )
-
-            # Обновляем состояние сессии
-            session.state = ConversationState.QUESTIONNAIRE
-            session.current_question = 0
+            await asyncio.sleep(1)
+            
+            if keyboard:
+                await update.message.reply_text(
+                    question_text,
+                    parse_mode='Markdown',
+                    reply_markup=keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    question_text,
+                    parse_mode='Markdown'
+                )
+            
+            session.current_state = BotState.DEMOGRAPHY
+            session.current_question_index = 0
             data_manager.save_session(session)
-
+            
     except Exception as e:
         logger.error(f"❌ Ошибка в questionnaire_command: {e}", exc_info=True)
         await update.message.reply_text(
             "❌ Произошла ошибка при запуске анкеты. Попробуйте позже."
         )
 
-
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /status (статус сессии)"""
+    """Обработчик команды /status"""
+    await context.bot.send_chat_action(
+        chat_id=update.effective_user.id,
+        action=ChatAction.TYPING
+    )
+    
     try:
         user_id = update.effective_user.id
-
         session = data_manager.get_session(user_id)
+        
         if not session:
             await update.message.reply_text(
                 "📭 У вас нет активной сессии. Используйте /start для начала работы."
             )
             return
-
+        
         status_text = format_session_summary(session)
-
-        if session.answers:
-            status_text += "\n\n" + format_answer_summary(session.answers)
-
+        if session.get_all_answers():
+            status_text += "\n" + format_answer_summary(session.get_all_answers())
+        
         keyboard = []
-
-        if session.state in [ConversationState.QUESTIONNAIRE, ConversationState.START]:
+        if session.current_state in [BotState.DEMOGRAPHY, BotState.PERSONALITY,
+                                      BotState.SKILLS, BotState.VALUES, BotState.LIMITATIONS]:
             keyboard.append([InlineKeyboardButton("▶️ Продолжить анкету", callback_data="continue_questionnaire")])
-
-        if session.answers:
+        if session.get_all_answers():
             keyboard.append([InlineKeyboardButton("📊 Показать ответы", callback_data="show_answers")])
-
         keyboard.append([InlineKeyboardButton("🔄 Начать заново", callback_data="restart_confirm")])
-
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
-
         await update.message.reply_text(
             text=status_text,
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
-
     except Exception as e:
         logger.error(f"❌ Ошибка в status_command: {e}")
+        await update.message.reply_text("📊 Не удалось получить статус сессии")
+
+async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда для отладки"""
+    await context.bot.send_chat_action(
+        chat_id=update.effective_user.id,
+        action=ChatAction.TYPING
+    )
+    
+    try:
+        user_id = update.effective_user.id
+        debug_info = f"""
+🐛 *ОТЛАДОЧНАЯ ИНФОРМАЦИЯ*
+
+👤 User ID: {user_id}
+📊 Всего сессий: {len(data_manager.sessions)}
+🕒 Время сервера: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+📁 *Конфигурация:*
+"""
+        from config.settings import config
+        debug_info += f"• Вопросов: {len(config.questions)}\n"
+        debug_info += f"• Ниш: {len(config.niche_categories)}\n"
+        debug_info += f"• Токен бота: {'✅ Установлен' if config.telegram_token else '❌ Отсутствует'}\n"
+        debug_info += f"• Токен OpenAI: {'✅ Установлен' if config.openai_api_key else '❌ Отсутствует'}\n"
+        
         await update.message.reply_text(
-            "📊 Не удалось получить статус сессии"
+            text=debug_info,
+            parse_mode="Markdown"
         )
+    except Exception as e:
+        logger.error(f"❌ Ошибка в debug_command: {e}")
+        await update.message.reply_text("🐛 Ошибка при получении отладочной информации")
 
-
-# Экспортируем все функции для импорта в bot.py
 __all__ = [
     'start_command',
     'help_command',
     'stats_command',
-    'balance_command',
     'restart_command',
     'questionnaire_command',
-    'status_command'
+    'status_command',
+    'debug_command'
 ]
