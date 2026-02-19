@@ -148,12 +148,11 @@ class BusinessNavigatorBot:
                 logger.error("❌ Application не инициализирован")
                 return
             
-            # Инициализируем Application
-            await self.application.initialize()
-            await self.application.start()
+            # 🔄 ВАЖНО: Для FastAPI используем только updater.start_polling()
+            # НЕ вызываем application.initialize()/start()/run_polling() вручную
+            # потому что FastAPI уже управляет event loop
             
-            # 🔄 ВАЖНО: Используем start_polling() вместо run_polling() для FastAPI
-            # start_polling() не блокирует event loop
+            # Запускаем updater в фоновом режиме
             self.application.updater.start_polling(
                 poll_interval=0.5,
                 timeout=10,
@@ -209,15 +208,11 @@ class BusinessNavigatorBot:
                 except asyncio.CancelledError:
                     pass
             
-            # 🔄 ВАЖНО: Останавливаем updater, а не run_polling
+            # 🔄 ВАЖНО: Останавливаем только updater, не application
+            # потому что application управляется FastAPI lifespan
             if self.application and self.application.updater:
                 await self.application.updater.stop()
                 logger.info("✅ Updater остановлен")
-            
-            if self.application:
-                await self.application.stop()
-                await self.application.shutdown()
-                logger.info("✅ Application остановлен и завершён")
             
             logger.info("✅ Бот полностью остановлен")
             
