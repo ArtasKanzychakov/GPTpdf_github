@@ -3,7 +3,6 @@
 """
 from enum import Enum
 
-
 class ConversationState(Enum):
     """Состояния диалога с ботом"""
     # Начальные состояния
@@ -30,7 +29,6 @@ class ConversationState(Enum):
     # Завершение
     COMPLETED = "completed"
 
-
 class PaymentStatus(Enum):
     """Статусы оплаты"""
     PENDING = "pending"
@@ -39,7 +37,6 @@ class PaymentStatus(Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
-
 class NicheCategory(Enum):
     """Категории ниш"""
     QUICK_START = "quick_start"
@@ -47,7 +44,6 @@ class NicheCategory(Enum):
     LONG_TERM = "long_term"
     RISKY = "risky"
     HIDDEN = "hidden"
-
 
 class UserRole(Enum):
     """Роли пользователей"""
