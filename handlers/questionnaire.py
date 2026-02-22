@@ -1,573 +1,729 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Обработчики анкеты v2.0 — Бизнес-Навигатор
-Архитектура: Class + Singleton + Wrapper functions
+Обработчики для анкетирования - DEMO VERSION
 """
 import logging
 import asyncio
-from typing import Optional, Dict, Any, List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ChatAction
 from telegram.ext import ContextTypes, ConversationHandler
-
 from models.session import UserSession, SessionStatus
 from models.enums import ConversationState
-from core.question_engine_v2 import QuestionEngineV2
-from handlers.ui_components import UIComponents, QuestionFormatter, ErrorMessages, SuccessMessages, LoadingMessages
-from services.data_manager import DataManager, data_manager as global_data_manager
-from services.openai_service import OpenAIService, openai_service as global_openai_service
+from handlers.ui_components import UIComponents, QuestionFormatter, LoadingMessages, SuccessMessages
+from services.data_manager import data_manager
+from services.openai_service import openai_service
 
 logger = logging.getLogger(__name__)
 
 
 class QuestionnaireHandler:
-    """Основной обработчик анкеты"""
+    """Обработчик анкетирования"""
     
-    def __init__(self, data_manager: DataManager, openai_service: OpenAIService):
-        self.dm = data_manager
-        self.ai = openai_service
-        self.qe = QuestionEngineV2()
+    def __init__(self):
+        self.data_manager = data_manager
+        self.openai_service = openai_service
         
         self.category_emojis = {
-            'demographic': '👤', 'personality': '🧠', 'skills': '💪',
-            'values': '💎', 'resources': '🛠️'
+            'start': '👋',
+            'demographic': '📊',
+            'interests': '🎯',
+            'energy': '⚡',
+            'skills': '💪',
+            'work_style': '💼',
+            'risk': '🎚️',
+            'values': '💎',
+            'dream': '📝',
+            'finish': '✅'
         }
-
-    async def _show_typing(self, update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
-        """Показать 'бот печатает' с задержкой"""
-        await context.bot.send_chat_action(chat_id=user_id, action=ChatAction.TYPING)
-        await asyncio.sleep(1.2)
-
+        
+        self.category_names = {
+            'start': 'Знакомство',
+            'demographic': 'О вас',
+            'interests': 'Интересы',
+            'energy': 'Энергия',
+            'skills': 'Навыки',
+            'work_style': 'Стиль работы',
+            'risk': 'Риск',
+            'values': 'Ценности',
+            'dream': 'Мечта',
+            'finish': 'Завершение'
+        }
+    
+    async def _show_typing(self, chat_id: int, context: ContextTypes.DEFAULT_TYPE, seconds: float = 1.5):
+        """Показать индикатор набора текста"""
+        await context.bot.send_chat_action(chat_id=chat_id, action='typing')
+        await asyncio.sleep(seconds)
+    
     async def start_questionnaire(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Начать анкету"""
+        """Начать анкетирование"""
         user_id = update.effective_user.id
-        await self._show_typing(update, context, user_id)
+        user_name = update.effective_user.first_name or "Пользователь"
         
-        session = await self.dm.get_session(user_id) or await self.dm.create_session(user_id)
-        await self.dm.update_status(user_id, SessionStatus.IN_PROGRESS)
+        # Показать индикатор набора
+        await self._show_typing(user_id, context, 1.0)
         
-        welcome = f"""
-✨ *ДОБРО ПОЖАЛОВАТЬ!* ✨
-
-🚀 *БИЗНЕС-НАВИГАТОР v7.0*
-_Интеллектуальный подбор бизнес-ниш_
-
-━━━━━━━━━━━━━━━━━━━━
-🎯 *Вас ждёт:*
-• 🧠 Психологический анализ
-• 💼 Персональные ниши
-• 📋 План действий
-• ⚡ UX нового поколения
-
-━━━━━━━━━━━━━━━━━━━━
-📊 *Процесс:*
-1️⃣ 7 интерактивных вопросов
-2️⃣ Мгновенный анализ
-3️⃣ Готовые рекомендации
-
-💎 *Это демо-версия* технологии.
-
-🚀 *Готовы начать?*
-"""
-        keyboard = [[
-            InlineKeyboardButton("📝 Начать", callback_data="start_q1"),
-            InlineKeyboardButton("ℹ️ О проекте", callback_data="about")
-        ]]
-        
-        await update.message.reply_text(welcome, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-        return ConversationState.DEMO_AGE.value
-
-    async def show_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE, question_id: str):
-        """Показать вопрос"""
-        query = update.callback_query if hasattr(update, 'callback_query') else None
-        user_id = update.effective_user.id
-        
-        # 🎨 ТИПИНГ ПЕРЕД КАЖДЫМ ВОПРОСОМ
-        await self._show_typing(update, context, user_id)
-        
-        session = await self.dm.get_session(user_id)
+        session = await self.data_manager.get_session(user_id)
         if not session:
-            if query: await query.answer("Сессия не найдена. /start")
+            session = await self.data_manager.create_session(user_id)
+        
+        await self.data_manager.update_status(user_id, SessionStatus.IN_PROGRESS)
+        
+        welcome_text = f"""
+🎯 *БИЗНЕС-НАВИГАТОР v7.0 (DEMO)*
+
+Привет, {user_name}! 👋
+
+Я помогу вам найти идеальную бизнес-нишу.
+Сейчас я задам `{10}` вопросов с разными типами ответов.
+
+📋 *Типы вопросов:*
+• 🔘 Кнопки выбора
+• ☑️ Мультиселект
+• 🎚️ Слайдеры
+• ⭐ Рейтинги
+• 📝 Текстовые ответы
+
+⏱️ Время: 3-5 минут
+⚠️ _Бот в демонстрационном режиме_
+
+Готовы начать?
+"""
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Начать анкету", callback_data="start_q1")],
+            [InlineKeyboardButton("ℹ️ О боте", callback_data="about")]
+        ]
+        
+        await update.message.reply_text(
+            welcome_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        
+        return ConversationState.DEMO_AGE.value
+    
+    async def show_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE, question_id: str):
+        """Показать вопрос пользователю"""
+        user_id = update.effective_user.id
+        
+        # Показать индикатор набора
+        await self._show_typing(user_id, context, 0.8)
+        
+        query = update.callback_query if hasattr(update, 'callback_query') else None
+        session = await self.data_manager.get_session(user_id)
+        
+        if not session:
+            if query:
+                await query.answer("Сессия не найдена. Начните с /start", show_alert=True)
             return
         
-        qdata = self.qe.get_question(question_id)
-        if not qdata:
+        from config.settings import config
+        question_data = config.get_question_by_id(question_id)
+        
+        if not question_data:
             logger.error(f"Вопрос {question_id} не найден")
-            if query: await query.answer("Ошибка загрузки вопроса")
             return
         
-        # Обновляем навигацию
-        cat = qdata.get('category')
-        qnum = int(question_id[1:])
-        session.add_to_navigation(cat, qnum)
-        session.current_question = qnum
-        session.current_category = cat
-        await self.dm.update_session(session)
+        # Обновить навигацию
+        category = question_data.get('category', 'start')
+        question_num = int(question_id[1:])
+        session.add_to_navigation(category, question_num)
+        session.current_question = question_num
+        session.current_category = category
+        await self.data_manager.update_session(session)
         
-        # Форматируем вопрос
-        emoji = self.category_emojis.get(cat, '📝')
-        qtext = self.qe.format_question_text(qdata)
-        formatted = QuestionFormatter.format_with_context(qtext, qnum, total_questions=7, category_emoji=emoji)
-        keyboard = self.qe.create_keyboard(qdata, session)
+        # Форматировать текст
+        category_emoji = self.category_emojis.get(category, '📝')
+        question_text = question_data.get('text', '')
+        
+        formatted_text = QuestionFormatter.format_with_context(
+            question_text,
+            question_num,
+            total_questions=10,
+            category_emoji=category_emoji
+        )
+        
+        # Создать клавиатуру
+        keyboard = self._create_keyboard(question_data, session)
         
         if query:
-            await query.edit_message_text(formatted, reply_markup=keyboard, parse_mode="Markdown")
+            await query.edit_message_text(
+                formatted_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
         else:
-            await update.message.reply_text(formatted, reply_markup=keyboard, parse_mode="Markdown")
-
+            await update.message.reply_text(
+                formatted_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+    
+    def _create_keyboard(self, question_data: dict, session: UserSession) -> Optional[InlineKeyboardMarkup]:
+        """Создать клавиатуру для вопроса"""
+        question_type = question_data.get('type', 'text')
+        question_id = question_data.get('id', 'Q1')
+        
+        if question_type == 'text' or question_type == 'existential_text':
+            return None
+        
+        keyboard = []
+        
+        if question_type == 'quick_buttons':
+            for option in question_data.get('options', []):
+                emoji = option.get('emoji', '')
+                label = option.get('label', '')
+                value = option.get('value', '')
+                keyboard.append([InlineKeyboardButton(f"{emoji} {label}", callback_data=f"answer:{value}")])
+        
+        elif question_type == 'multi_select':
+            selected = session.temp_data.get(f"{question_id}_selected", [])
+            for option in question_data.get('options', []):
+                value = option.get('value', '')
+                emoji = option.get('emoji', '')
+                label = option.get('label', '')
+                checkmark = "✅ " if value in selected else ""
+                keyboard.append([InlineKeyboardButton(f"{checkmark}{emoji} {label}", callback_data=f"multiselect:{value}")])
+            
+            validation = question_data.get('validation', {})
+            min_choices = validation.get('min_choices', 1)
+            if len(selected) >= min_choices:
+                keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        
+        elif question_type == 'energy_distribution':
+            energy_levels = session.temp_data.get(f"{question_id}_energy", {})
+            for period in question_data.get('time_periods', []):
+                period_id = period.get('period', '')
+                label = period.get('label', '')
+                emoji = period.get('emoji', '')
+                current = energy_levels.get(period_id, 4)
+                
+                keyboard.append([InlineKeyboardButton(f"{emoji} {label}: {current}/7", callback_data="info")])
+                row = []
+                if current > 1:
+                    row.append(InlineKeyboardButton("➖", callback_data=f"energy_dec:{period_id}"))
+                row.append(InlineKeyboardButton(f"{current}", callback_data="info"))
+                if current < 7:
+                    row.append(InlineKeyboardButton("➕", callback_data=f"energy_inc:{period_id}"))
+                keyboard.append(row)
+            
+            if len(energy_levels) == len(question_data.get('time_periods', [])):
+                keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        
+        elif question_type == 'skill_rating':
+            ratings = session.temp_data.get(f"{question_id}_ratings", {})
+            for skill in question_data.get('skills', []):
+                skill_id = skill.get('id', '')
+                label = skill.get('label', '')
+                emoji = skill.get('emoji', '')
+                current = ratings.get(skill_id, 0)
+                
+                stars = "⭐" * current + "☆" * (5 - current)
+                keyboard.append([InlineKeyboardButton(f"{emoji} {label}", callback_data="info")])
+                keyboard.append([InlineKeyboardButton(f"{stars}", callback_data="info")])
+                
+                row = []
+                for i in range(1, 6):
+                    row.append(InlineKeyboardButton(str(i), callback_data=f"rating:{skill_id}:{i}"))
+                keyboard.append(row)
+            
+            if len(ratings) == len(question_data.get('skills', [])):
+                keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        
+        elif question_type == 'learning_allocation':
+            allocation = session.temp_data.get(f"{question_id}_allocation", {})
+            total_points = question_data.get('total_points', 10)
+            used = sum(allocation.values())
+            remaining = total_points - used
+            
+            for fmt in question_data.get('formats', []):
+                fmt_id = fmt.get('id', '')
+                label = fmt.get('label', '')
+                emoji = fmt.get('emoji', '')
+                current = allocation.get(fmt_id, 0)
+                
+                keyboard.append([InlineKeyboardButton(f"{emoji} {label}: {current}", callback_data="info")])
+                row = []
+                if current > 0:
+                    row.append(InlineKeyboardButton("➖", callback_data=f"alloc_dec:{fmt_id}"))
+                row.append(InlineKeyboardButton(f"{current}", callback_data="info"))
+                if remaining > 0:
+                    row.append(InlineKeyboardButton("➕", callback_data=f"alloc_inc:{fmt_id}"))
+                keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton(f"📊 Осталось: {remaining}/{total_points}", callback_data="info")])
+            
+            if remaining == 0:
+                keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        
+        elif question_type == 'slider_with_scenario':
+            selected_option = session.temp_data.get(f"{question_id}_option")
+            
+            if not selected_option:
+                for option in question_data.get('options', []):
+                    label = option.get('label', '')
+                    value = option.get('value', '')
+                    keyboard.append([InlineKeyboardButton(label, callback_data=f"slider_option:{value}")])
+            else:
+                slider_data = question_data.get('slider', {})
+                current_val = session.temp_data.get(f"{question_id}_value", 5)
+                min_val = slider_data.get('min', 1)
+                max_val = slider_data.get('max', 10)
+                
+                keyboard.append([InlineKeyboardButton(f"Уровень: {current_val}/{max_val}", callback_data="info")])
+                row = []
+                if current_val > min_val:
+                    row.append(InlineKeyboardButton("➖", callback_data="slider_dec"))
+                row.append(InlineKeyboardButton(f"{current_val}", callback_data="info"))
+                if current_val < max_val:
+                    row.append(InlineKeyboardButton("➕", callback_data="slider_inc"))
+                keyboard.append(row)
+                keyboard.append([InlineKeyboardButton("✅ Продолжить", callback_data="submit")])
+        
+        elif question_type == 'scenario_test':
+            for option in question_data.get('options', []):
+                label = option.get('label', '')
+                value = option.get('value', '')
+                desc = option.get('description', '')
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"scenario:{value}")])
+                if desc:
+                    keyboard.append([InlineKeyboardButton(f"   └─ {desc}", callback_data="info")])
+        
+        elif question_type == 'confirmation':
+            keyboard.append([InlineKeyboardButton("✅ Завершить анкету", callback_data="submit")])
+        
+        # Кнопка назад
+        if question_id != 'Q1':
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
+        
+        return InlineKeyboardMarkup(keyboard) if keyboard else None
+    
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Обработать callback"""
+        """Обработать callback от кнопок"""
         query = update.callback_query
         await query.answer()
+        
         user_id = update.effective_user.id
-        session = await self.dm.get_session(user_id)
+        session = await self.data_manager.get_session(user_id)
         
         if not session:
-            await query.edit_message_text("Сессия истекла. /start")
+            await query.edit_message_text("Сессия истекла. Начните с /start")
             return ConversationHandler.END
         
-        cb = query.data
+        callback_data = query.data
         
-        if cb.startswith("start_q"): return await self._start_q(update, context, session)
-        elif cb.startswith("answer:"): return await self._simple_answer(update, context, session)
-        elif cb.startswith("multiselect:"): return await self._multi_answer(update, context, session)
-        elif cb.startswith("scenario:"): return await self._scenario_answer(update, context, session)
-        elif cb.startswith("slider_"): return await self._slider_answer(update, context, session)
-        elif cb.startswith("rating:"): return await self._rating_answer(update, context, session)
-        elif cb.startswith("alloc_"): return await self._alloc_answer(update, context, session)
-        elif cb.startswith("energy_"): return await self._energy_answer(update, context, session)
-        elif cb.startswith("flow:"): return await self._flow_answer(update, context, session)
-        elif cb == "submit": return await self._submit_answer(update, context, session)
-        elif cb == "back": return await self._go_back(update, context, session)
-        elif cb == "info": await query.answer("ℹ️"); return session.current_question
-        else: await query.answer("Неизвестная команда"); return session.current_question
-
-    async def _start_q(self, update, context, session):
-        await self.show_question(update, context, "Q1")
-        return ConversationState.DEMO_AGE.value
-
-    async def _simple_answer(self, update, context, session):
+        # Показать индикатор набора
+        await self._show_typing(user_id, context, 0.5)
+        
+        if callback_data.startswith("start_q"):
+            await self.show_question(update, context, "Q1")
+            return ConversationState.DEMO_AGE.value
+        
+        elif callback_data.startswith("answer:"):
+            return await self._handle_simple_answer(update, context, session)
+        
+        elif callback_data.startswith("multiselect:"):
+            return await self._handle_multiselect(update, context, session)
+        
+        elif callback_data.startswith("scenario:"):
+            return await self._handle_scenario(update, context, session)
+        
+        elif callback_data.startswith("slider_option:") or callback_data in ["slider_inc", "slider_dec"]:
+            return await self._handle_slider(update, context, session)
+        
+        elif callback_data.startswith("rating:"):
+            return await self._handle_rating(update, context, session)
+        
+        elif callback_data.startswith("alloc_inc:") or callback_data.startswith("alloc_dec:"):
+            return await self._handle_allocation(update, context, session)
+        
+        elif callback_data.startswith("energy_inc:") or callback_data.startswith("energy_dec:"):
+            return await self._handle_energy(update, context, session)
+        
+        elif callback_data == "submit":
+            return await self._submit_answer(update, context, session)
+        
+        elif callback_data == "back":
+            return await self._go_back(update, context, session)
+        
+        elif callback_data == "info":
+            await query.answer("ℹ️ Информация", show_alert=False)
+            return session.current_question
+        
+        return session.current_question
+    
+    async def _handle_simple_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Обработать простой ответ"""
+        query = update.callback_query
+        answer_value = query.data.split(":", 1)[1]
+        current_q_id = f"Q{session.current_question}"
+        
+        await self.data_manager.save_answer(session.user_id, current_q_id, answer_value)
+        return await self._proceed_to_next(update, context, session)
+    
+    async def _handle_multiselect(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Обработать множественный выбор"""
         query = update.callback_query
         value = query.data.split(":", 1)[1]
-        qid = f"Q{session.current_question}"
-        qdata = self.qe.get_question(qid)
+        current_q_id = f"Q{session.current_question}"
+        temp_key = f"{current_q_id}_selected"
         
-        if qdata.get('allow_custom_input') and value == 'custom':
-            await self.dm.update_temp_data(session.user_id, f"{qid}_awaiting_custom", True)
-            await query.edit_message_text(f"✏️ {qdata.get('custom_input_prompt', 'Введите ответ:')}")
-            return ConversationState.DEMO_CITY.value
+        selected = session.temp_data.get(temp_key, [])
         
-        await self.dm.save_answer(session.user_id, qid, value)
-        return await self._next(update, context, session)
-
-    async def _multi_answer(self, update, context, session):
-        query = update.callback_query
-        value = query.data.split(":", 1)[1]
-        qid = f"Q{session.current_question}"
-        key = f"{qid}_selected"
-        selected = session.temp_data.get(key, [])
-        
-        if value in selected: selected.remove(value)
+        if value in selected:
+            selected.remove(value)
         else:
-            qdata = self.qe.get_question(qid)
-            max_c = qdata.get('validation', {}).get('max_choices', 10)
-            if len(selected) >= max_c:
-                await query.answer(f"⚠️ Максимум {max_c} вариантов")
+            from config.settings import config
+            question_data = config.get_question_by_id(current_q_id)
+            validation = question_data.get('validation', {})
+            max_choices = validation.get('max_choices', 10)
+            
+            if len(selected) >= max_choices:
+                await query.answer(f"⚠️ Максимум {max_choices} вариантов", show_alert=True)
                 return session.current_question
+            
             selected.append(value)
         
-        await self.dm.update_temp_data(session.user_id, key, selected)
-        keyboard = self.qe.create_keyboard(self.qe.get_question(qid), session)
-        await query.edit_message_reply_markup(reply_markup=keyboard)
+        await self.data_manager.update_temp_data(session.user_id, temp_key, selected)
+        await self.show_question(update, context, current_q_id)
+        
         return session.current_question
-
-    async def _scenario_answer(self, update, context, session):
+    
+    async def _handle_scenario(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Обработать сценарный ответ"""
         query = update.callback_query
         value = query.data.split(":", 1)[1]
-        await self.dm.save_answer(session.user_id, f"Q{session.current_question}", value)
-        return await self._next(update, context, session)
-
-    async def _slider_answer(self, update, context, session):
+        current_q_id = f"Q{session.current_question}"
+        
+        await self.data_manager.save_answer(session.user_id, current_q_id, value)
+        return await self._proceed_to_next(update, context, session)
+    
+    async def _handle_slider(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Обработать слайдер"""
         query = update.callback_query
-        cb = query.data
-        qid = f"Q{session.current_question}"
-        qdata = self.qe.get_question(qid)
+        callback_data = query.data
+        current_q_id = f"Q{session.current_question}"
         
-        if cb.startswith("slider_option:"):
-            opt = cb.split(":", 1)[1]
-            await self.dm.update_temp_data(session.user_id, f"{qid}_option", opt)
-            slider = qdata.get('slider', {})
-            init = (slider.get('min', 1) + slider.get('max', 10)) // 2
-            await self.dm.update_temp_data(session.user_id, f"{qid}_value", init)
-        elif cb == "slider_inc":
-            cur = session.temp_data.get(f"{qid}_value", 5)
-            mx = qdata.get('slider', {}).get('max', 10)
-            if cur < mx: await self.dm.update_temp_data(session.user_id, f"{qid}_value", cur + 1)
-        elif cb == "slider_dec":
-            cur = session.temp_data.get(f"{qid}_value", 5)
-            mn = qdata.get('slider', {}).get('min', 1)
-            if cur > mn: await self.dm.update_temp_data(session.user_id, f"{qid}_value", cur - 1)
+        from config.settings import config
+        question_data = config.get_question_by_id(current_q_id)
+        slider_data = question_data.get('slider', {})
         
-        keyboard = self.qe.create_keyboard(qdata, session)
-        await query.edit_message_reply_markup(reply_markup=keyboard)
+        if callback_data.startswith("slider_option:"):
+            option = callback_data.split(":", 1)[1]
+            await self.data_manager.update_temp_data(session.user_id, f"{current_q_id}_option", option)
+            initial_value = (slider_data.get('min', 1) + slider_data.get('max', 10)) // 2
+            await self.data_manager.update_temp_data(session.user_id, f"{current_q_id}_value", initial_value)
+        
+        elif callback_data == "slider_inc":
+            current_value = session.temp_data.get(f"{current_q_id}_value", 5)
+            if current_value < slider_data.get('max', 10):
+                await self.data_manager.update_temp_data(session.user_id, f"{current_q_id}_value", current_value + 1)
+        
+        elif callback_data == "slider_dec":
+            current_value = session.temp_data.get(f"{current_q_id}_value", 5)
+            if current_value > slider_data.get('min', 1):
+                await self.data_manager.update_temp_data(session.user_id, f"{current_q_id}_value", current_value - 1)
+        
+        await self.show_question(update, context, current_q_id)
         return session.current_question
-
-    async def _rating_answer(self, update, context, session):
+    
+    async def _handle_rating(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Обработать рейтинг"""
         query = update.callback_query
         _, skill_id, rating = query.data.split(":")
-        qid = f"Q{session.current_question}"
-        key = f"{qid}_ratings"
-        ratings = session.temp_data.get(key, {})
-        ratings[skill_id] = int(rating)
-        await self.dm.update_temp_data(session.user_id, key, ratings)
-        keyboard = self.qe.create_keyboard(self.qe.get_question(qid), session)
-        await query.edit_message_reply_markup(reply_markup=keyboard)
+        rating = int(rating)
+        
+        current_q_id = f"Q{session.current_question}"
+        temp_key = f"{current_q_id}_ratings"
+        
+        ratings = session.temp_data.get(temp_key, {})
+        ratings[skill_id] = rating
+        await self.data_manager.update_temp_data(session.user_id, temp_key, ratings)
+        
+        await self.show_question(update, context, current_q_id)
         return session.current_question
-
-    async def _alloc_answer(self, update, context, session):
+    
+    async def _handle_allocation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Обработать распределение баллов"""
         query = update.callback_query
-        cb = query.data
-        qid = f"Q{session.current_question}"
-        qdata = self.qe.get_question(qid)
-        total = qdata.get('total_points', 10)
-        key = f"{qid}_allocation"
-        alloc = session.temp_data.get(key, {})
+        callback_data = query.data
+        current_q_id = f"Q{session.current_question}"
         
-        if cb.startswith("alloc_inc:"):
-            fmt_id = cb.split(":", 1)[1]
-            if sum(alloc.values()) < total: alloc[fmt_id] = alloc.get(fmt_id, 0) + 1
-        elif cb.startswith("alloc_dec:"):
-            fmt_id = cb.split(":", 1)[1]
-            if alloc.get(fmt_id, 0) > 0: alloc[fmt_id] -= 1
+        from config.settings import config
+        question_data = config.get_question_by_id(current_q_id)
+        total_points = question_data.get('total_points', 10)
         
-        await self.dm.update_temp_data(session.user_id, key, alloc)
-        keyboard = self.qe.create_keyboard(qdata, session)
-        await query.edit_message_reply_markup(reply_markup=keyboard)
+        temp_key = f"{current_q_id}_allocation"
+        allocation = session.temp_data.get(temp_key, {})
+        
+        if callback_data.startswith("alloc_inc:"):
+            fmt_id = callback_data.split(":", 1)[1]
+            used = sum(allocation.values())
+            if used < total_points:
+                allocation[fmt_id] = allocation.get(fmt_id, 0) + 1
+                await self.data_manager.update_temp_data(session.user_id, temp_key, allocation)
+        
+        elif callback_data.startswith("alloc_dec:"):
+            fmt_id = callback_data.split(":", 1)[1]
+            if allocation.get(fmt_id, 0) > 0:
+                allocation[fmt_id] -= 1
+                await self.data_manager.update_temp_data(session.user_id, temp_key, allocation)
+        
+        await self.show_question(update, context, current_q_id)
         return session.current_question
-
-    async def _energy_answer(self, update, context, session):
+    
+    async def _handle_energy(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Обработать энергию"""
         query = update.callback_query
-        cb = query.data
-        qid = f"Q{session.current_question}"
-        qdata = self.qe.get_question(qid)
+        callback_data = query.data
+        current_q_id = f"Q{session.current_question}"
         
-        if cb.startswith("energy_inc:"):
-            p = cb.split(":", 1)[1]
-            key = f"{qid}_energy"
-            el = session.temp_data.get(key, {})
-            if el.get(p, 4) < 7: el[p] = el.get(p, 4) + 1; await self.dm.update_temp_data(session.user_id, key, el)
-        elif cb.startswith("energy_dec:"):
-            p = cb.split(":", 1)[1]
-            key = f"{qid}_energy"
-            el = session.temp_data.get(key, {})
-            if el.get(p, 4) > 1: el[p] = el.get(p, 4) - 1; await self.dm.update_temp_data(session.user_id, key, el)
-        elif cb == "energy_next":
-            await self.dm.update_temp_data(session.user_id, f"{qid}_step", 'activities')
-        elif cb.startswith("activity:"):
-            _, act_type, time = cb.split(":")
-            key = f"{qid}_activities"
-            acts = session.temp_data.get(key, {})
-            acts[act_type] = time
-            await self.dm.update_temp_data(session.user_id, key, acts)
+        if callback_data.startswith("energy_inc:"):
+            period = callback_data.split(":", 1)[1]
+            temp_key = f"{current_q_id}_energy"
+            energy_levels = session.temp_data.get(temp_key, {})
+            current_level = energy_levels.get(period, 4)
+            if current_level < 7:
+                energy_levels[period] = current_level + 1
+                await self.data_manager.update_temp_data(session.user_id, temp_key, energy_levels)
         
-        keyboard = self.qe.create_keyboard(qdata, session)
-        await query.edit_message_reply_markup(reply_markup=keyboard)
+        elif callback_data.startswith("energy_dec:"):
+            period = callback_data.split(":", 1)[1]
+            temp_key = f"{current_q_id}_energy"
+            energy_levels = session.temp_data.get(temp_key, {})
+            current_level = energy_levels.get(period, 4)
+            if current_level > 1:
+                energy_levels[period] = current_level - 1
+                await self.data_manager.update_temp_data(session.user_id, temp_key, energy_levels)
+        
+        await self.show_question(update, context, current_q_id)
         return session.current_question
-
-    async def _flow_answer(self, update, context, session):
-        query = update.callback_query
-        value = query.data.split(":", 1)[1]
-        qid = f"Q{session.current_question}"
-        await self.dm.update_temp_data(session.user_id, f"{qid}_example", value)
-        qdata = self.qe.get_question(qid)
-        prompt = qdata.get('text_input', {}).get('prompt', 'Опишите ощущения:')
-        await query.edit_message_text(f"✏️ {prompt}")
-        return ConversationState.VALUES_FLOW.value
-
-    async def _submit_answer(self, update, context, session):
-        qid = f"Q{session.current_question}"
-        qdata = self.qe.get_question(qid)
-        qtype = qdata.get('type')
+    
+    async def _submit_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Подтвердить и сохранить ответ"""
+        current_q_id = f"Q{session.current_question}"
         
-        # Собираем финальный ответ
-        ans = None
-        if qtype == 'multi_select': ans = session.temp_data.get(f"{qid}_selected", [])
-        elif qtype == 'slider_with_scenario': ans = {'option': session.temp_data.get(f"{qid}_option"), 'value': session.temp_data.get(f"{qid}_value")}
-        elif qtype == 'skill_rating': ans = session.temp_data.get(f"{qid}_ratings", {})
-        elif qtype == 'learning_allocation': ans = session.temp_data.get(f"{qid}_allocation", {})
-        elif qtype == 'energy_distribution': ans = {'energy_levels': session.temp_data.get(f"{qid}_energy", {}), 'activities': session.temp_data.get(f"{qid}_activities", {})}
+        from config.settings import config
+        question_data = config.get_question_by_id(current_q_id)
+        question_type = question_data.get('type')
+        
+        final_answer = None
+        
+        if question_type == 'multi_select':
+            temp_key = f"{current_q_id}_selected"
+            final_answer = session.temp_data.get(temp_key, [])
+        elif question_type == 'slider_with_scenario':
+            final_answer = {
+                'option': session.temp_data.get(f"{current_q_id}_option"),
+                'value': session.temp_data.get(f"{current_q_id}_value")
+            }
+        elif question_type == 'skill_rating':
+            temp_key = f"{current_q_id}_ratings"
+            final_answer = session.temp_data.get(temp_key, {})
+        elif question_type == 'learning_allocation':
+            temp_key = f"{current_q_id}_allocation"
+            final_answer = session.temp_data.get(temp_key, {})
+        elif question_type == 'energy_distribution':
+            final_answer = session.temp_data.get(f"{current_q_id}_energy", {})
+        elif question_type == 'confirmation':
+            return await self._complete_questionnaire(update, context, session)
+        else:
+            return await self._proceed_to_next(update, context, session)
         
         # Валидация
-        valid, err = self.qe.validate_answer(qid, ans, session)
-        if not valid:
-            await update.callback_query.answer(err, show_alert=True)
-            return session.current_question
+        validation = question_data.get('validation', {})
+        if validation.get('sum_equals'):
+            expected_sum = validation['sum_equals']
+            actual_sum = sum(final_answer.values()) if isinstance(final_answer, dict) else 0
+            if actual_sum != expected_sum:
+                query = update.callback_query
+                await query.answer(f"❌ Сумма должна быть {expected_sum}, текущая: {actual_sum}", show_alert=True)
+                return session.current_question
         
-        await self.dm.save_answer(session.user_id, qid, ans)
-        # Чистим temp
-        for k in list(session.temp_data.keys()):
-            if k.startswith(qid): session.temp_data.pop(k, None)
-        await self.dm.update_session(session)
+        await self.data_manager.save_answer(session.user_id, current_q_id, final_answer)
         
-        return await self._next(update, context, session)
-
-    async def _next(self, update, context, session):
-        qid = f"Q{session.current_question}"
-        next_qid = self.qe.get_next_question_id(qid)
-        if not next_qid: return await self._complete(update, context, session)
-        await self.show_question(update, context, next_qid)
-        return self._state_for_q(next_qid)
-
-    async def _go_back(self, update, context, session):
+        # Очистить temp_data
+        keys_to_clear = [k for k in session.temp_data.keys() if k.startswith(current_q_id)]
+        for key in keys_to_clear:
+            session.temp_data.pop(key, None)
+        await self.data_manager.update_session(session)
+        
+        return await self._proceed_to_next(update, context, session)
+    
+    async def _proceed_to_next(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Перейти к следующему вопросу"""
+        current_q_id = f"Q{session.current_question}"
+        next_num = session.current_question + 1
+        
+        if next_num > 10:
+            return await self._complete_questionnaire(update, context, session)
+        
+        next_q_id = f"Q{next_num}"
+        await self.show_question(update, context, next_q_id)
+        
+        return self._get_state_for_question(next_q_id)
+    
+    async def _go_back(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Вернуться к предыдущему вопросу"""
         prev = session.go_back()
+        
         if not prev:
-            await update.callback_query.answer("Это первый вопрос")
+            query = update.callback_query
+            await query.answer("Это первый вопрос", show_alert=True)
             return session.current_question
-        cat, qnum = prev
-        await self.show_question(update, context, f"Q{qnum}")
-        return self._state_for_q(f"Q{qnum}")
-
-    async def _complete(self, update, context, session):
-        await self.dm.update_status(session.user_id, SessionStatus.QUESTIONNAIRE_COMPLETED)
-        await update.callback_query.edit_message_text(SuccessMessages.QUESTIONNAIRE_COMPLETED, parse_mode="Markdown")
-        await self._analyze(update, context, session)
+        
+        category, question_num = prev
+        prev_q_id = f"Q{question_num}"
+        
+        await self.show_question(update, context, prev_q_id)
+        return self._get_state_for_question(prev_q_id)
+    
+    async def _complete_questionnaire(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession) -> int:
+        """Завершить анкету и начать анализ"""
+        query = update.callback_query
+        
+        await self.data_manager.update_status(session.user_id, SessionStatus.QUESTIONNAIRE_COMPLETED)
+        
+        await query.edit_message_text(SuccessMessages.QUESTIONNAIRE_COMPLETED, parse_mode='Markdown')
+        
+        await self._start_analysis(update, context, session)
+        
         return ConversationState.PROCESSING.value
-
-    async def _analyze(self, update, context, session):
+    
+    async def _start_analysis(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession):
+        """Запустить анализ ответов"""
         user_id = session.user_id
-        loading = await context.bot.send_message(chat_id=user_id, text=LoadingMessages.ANALYZING, parse_mode="Markdown")
-        await asyncio.sleep(2)
+        
+        # Показать индикатор набора
+        await self._show_typing(user_id, context, 2.0)
+        
+        loading_msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=LoadingMessages.ANALYZING,
+            parse_mode='Markdown'
+        )
         
         try:
-            # MOCK-анализ
-            analysis = self._mock_analysis(session)
-            session.psychological_analysis = analysis
-            await self.dm.update_status(user_id, SessionStatus.ANALYSIS_GENERATED)
-            await self.dm.update_session(session)
-            await loading.edit_text(f"✅ *Анализ готов!*\n\n{analysis[:400]}...", parse_mode="Markdown")
+            await asyncio.sleep(2)
+            
+            analysis = await self.openai_service.analyze_user_profile(update, context, session)
+            
+            await loading_msg.edit_text(f"✅ Анализ завершен!\n\n{analysis}", parse_mode='Markdown')
+            
             await self._generate_niches(update, context, session)
+            
         except Exception as e:
             logger.error(f"Ошибка анализа: {e}")
-            await loading.edit_text("❌ Ошибка анализа. Попробуйте позже.", parse_mode="Markdown")
-
-    def _mock_analysis(self, session: UserSession) -> str:
-        answers = session.answers
-        age = answers.get('Q1', 'не указано')
-        risk = answers.get('Q6', {}).get('value', '5') if isinstance(answers.get('Q6'), dict) else '5'
-        energy = answers.get('Q7', {}).get('energy_levels', {}) if isinstance(answers.get('Q7'), dict) else {}
-        m, d, e = energy.get('morning', 4), energy.get('day', 4), energy.get('evening', 4)
-        peak = "утро" if m >= d and m >= e else "день" if d >= e else "вечер"
-        
-        return f"""
-🧠 *ВАШ ПСИХОЛОГИЧЕСКИЙ ПРОФИЛЬ*
-
-━━━━━━━━━━━━━━━━━━━━
-👤 *ДЕМОГРАФИЯ:*
-• Возраст: {age}
-• Профиль: Активный предприниматель
-
-⚡ *ЭНЕРГЕТИКА:*
-• Утро: {m}/7 {'🌅'*m}{'▁'*(7-m)}
-• День: {d}/7 {'☀️'*d}{'▁'*(7-d)}
-• Вечер: {e}/7 {'🌙'*e}{'▁'*(7-e)}
-🎯 Пик: *{peak}*
-
-🎲 *РИСК:* {risk}/10
-{'🔥 Высокий' if int(risk)>=7 else '⚖️ Умеренный' if int(risk)>=4 else '🔒 Осторожный'}
-
-💎 *ПОТЕНЦИАЛ:*
-• Комбинация навыков → цифровые продукты
-• Энергетика → проектная работа
-• Стиль решений → оптимален для стартапов
-
-━━━━━━━━━━━━━━━━━━━━
-🚀 *Система подобрала 3 персональные ниши...*
-"""
-
-    async def _generate_niches(self, update, context, session):
+            await loading_msg.edit_text("❌ Произошла ошибка при анализе.")
+    
+    async def _generate_niches(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session: UserSession):
+        """Генерация бизнес-ниш"""
         user_id = session.user_id
-        loading = await context.bot.send_message(chat_id=user_id, text=LoadingMessages.GENERATING_NICHES, parse_mode="Markdown")
-        await asyncio.sleep(2)
         
-        niches = self._mock_niches()
-        session.generated_niches = niches
-        await self.dm.update_session(session)
-        await loading.edit_text(niches, parse_mode="Markdown")
-        await self._final_presentation(update, context, session)
-
-    def _mock_niches(self) -> str:
-        return """
-🎯 *ПОДОБРАННЫЕ НИШИ*
-
-━━━━━━━━━━━━━━━━━━━━
-🔥 *1. КОНСУЛЬТАЦИИ*
-**Категория:** Быстрый старт
-**Окупаемость:** 1-3 месяца | **Инвестиции:** от 10,000₽
-
-💻 *2. ОНЛАЙН-КУРСЫ*
-**Категория:** Масштабируемый
-**Окупаемость:** 2-4 месяца | **Инвестиции:** от 50,000₽
-
-🚀 *3. ФРИЛАНС-УСЛУГИ*
-**Категория:** Минимальный риск
-**Окупаемость:** 1-2 месяца | **Инвестиции:** от 5,000₽
-
-━━━━━━━━━━━━━━━━━━━━
-"""
-
-    async def _final_presentation(self, update, context, session):
-        user_id = session.user_id
-        await self._show_typing(update, context, user_id)
+        await self._show_typing(user_id, context, 2.0)
         
-        final = """
-🎊 *АНАЛИЗ ЗАВЕРШЁН!*
-
-━━━━━━━━━━━━━━━━━━━━
-📊 *РЕЗУЛЬТАТЫ:*
-✅ Ответов: *7* | ⚡ Время: *0.3 сек*
-🤖 Токенов: *0* (локальная обработка)
-
-━━━━━━━━━━━━━━━━━━━━
-🚀 *DEMO UX-ДВИЖОК v7.0*
-
-✨ *Полная версия включает:*
-✓ 35 глубоких вопросов
-✓ AI-анализ GPT-4
-✓ 8 персонализированных ниш
-✓ 90-дневный план
-✓ PDF-отчёт
-✓ Платежи и масштабирование
-
-━━━━━━━━━━━━━━━━━━━━
-💡 *ХОТИТЕ ТАКУЮ СИСТЕМУ?*
-
-📩 *Разработчик:* @your_contact
-
-🌐 *Стек:* Python • FastAPI • Telegram Bot • OpenAI • PostgreSQL • Docker
-
-━━━━━━━━━━━━━━━━━━━━
-🔄 *Дальше:*
-• /restart — Пройти заново
-• /start — Главное меню
-• /help — Справка
-
-━━━━━━━━━━━━━━━━━━━━
-*Спасибо за использование Бизнес-Навигатора!* ✨
-"""
-        keyboard = [[
-            InlineKeyboardButton("🔄 Заново", callback_data="restart_questionnaire"),
-            InlineKeyboardButton("🏠 Меню", callback_data="main_menu")
-        ], [InlineKeyboardButton("📩 Связаться", url="https://t.me/your_contact")]]
+        loading_msg = await context.bot.send_message(
+            chat_id=user_id,
+            text=LoadingMessages.GENERATING_NICHES,
+            parse_mode='Markdown'
+        )
         
-        await context.bot.send_message(chat_id=user_id, text=final, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-
+        try:
+            await asyncio.sleep(2)
+            
+            niches = await self.openai_service.generate_niches(session)
+            
+            message = "🎯 *НАЙДЕННЫЕ НИШИ:*\n\n"
+            keyboard = []
+            
+            for i, niche in enumerate(niches, 1):
+                message += f"{i}. {niche['emoji']} *{niche['name']}*\n"
+                message += f"   📊 {niche['category']}\n"
+                desc = niche['description'][:80] + "..." if len(niche['description']) > 80 else niche['description']
+                message += f"   📝 {desc}\n"
+                message += f"   🎯 Риск: {'★' * niche['risk_level']}{'☆' * (5 - niche['risk_level'])}\n"
+                message += f"   ⏱️ {niche['time_to_profit']}\n\n"
+                
+                keyboard.append([InlineKeyboardButton(
+                    f"{i}. {niche['emoji']} {niche['name']}",
+                    callback_data=f"select_niche_{niche['id']}"
+                )])
+            
+            keyboard.append([InlineKeyboardButton("🔄 Пройти заново", callback_data="restart_questionnaire")])
+            
+            await loading_msg.edit_text(
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка генерации ниш: {e}")
+            await loading_msg.edit_text("❌ Ошибка при генерации ниш.")
+    
+    def _get_state_for_question(self, question_id: str) -> int:
+        """Получить состояние для вопроса"""
+        question_num = int(question_id[1:])
+        
+        state_map = {
+            1: ConversationState.DEMO_AGE.value,
+            2: ConversationState.DEMO_EDUCATION.value,
+            3: ConversationState.DEMO_CITY.value,
+            4: ConversationState.PERSONALITY_MOTIVATION.value,
+            5: ConversationState.PERSONALITY_TYPE.value,
+            6: ConversationState.PERSONALITY_RISK.value,
+            7: ConversationState.PERSONALITY_ENERGY.value,
+            8: ConversationState.PERSONALITY_FEARS.value,
+            9: ConversationState.SKILLS_COGNITIVE.value,
+            10: ConversationState.PROCESSING.value,
+        }
+        
+        return state_map.get(question_num, ConversationState.MAIN_MENU.value)
+    
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Обработать текстовый ввод"""
         user_id = update.effective_user.id
-        text = update.message.text
-        await self._show_typing(update, context, user_id)
+        text = update.message.text.strip()
         
-        session = await self.dm.get_session(user_id)
+        session = await self.data_manager.get_session(user_id)
         if not session:
-            await update.message.reply_text("Сессия не найдена. /start")
+            await update.message.reply_text("Сессия не найдена. Начните с /start")
             return ConversationHandler.END
         
-        qid = f"Q{session.current_question}"
-        qdata = self.qe.get_question(qid)
+        current_q_id = f"Q{session.current_question}"
         
-        # Custom input
-        if session.temp_data.get(f"{qid}_awaiting_custom"):
-            await self.dm.save_answer(session.user_id, qid, {'type': 'custom', 'value': text})
-            session.temp_data.pop(f"{qid}_awaiting_custom", None)
-            await self.dm.update_session(session)
-            next_qid = self.qe.get_next_question_id(qid)
-            if next_qid:
-                await self.show_question(update, context, next_qid)
-                return self._state_for_q(next_qid)
-            else: return await self._complete(update, context, session)
+        from config.settings import config
+        question_data = config.get_question_by_id(current_q_id)
         
-        # Текстовые вопросы
-        if qdata.get('type') in ['existential_text', 'text']:
-            validation = qdata.get('validation', {})
-            min_l = validation.get('min_length', 0)
-            max_l = validation.get('max_length', 5000)
-            if len(text) < min_l:
-                await update.message.reply_text(ErrorMessages.format_validation_error('min_length', value=min_l))
-                return session.current_question
-            if len(text) > max_l:
-                await update.message.reply_text(ErrorMessages.format_validation_error('max_length', value=max_l))
+        if not question_data:
+            return session.current_question
+        
+        question_type = question_data.get('type', 'text')
+        
+        if question_type in ['text', 'existential_text']:
+            validation = question_data.get('validation', {})
+            min_length = validation.get('min_length', 0)
+            max_length = validation.get('max_length', 500)
+            
+            if len(text) < min_length:
+                await update.message.reply_text(f"❌ Минимальная длина: {min_length} символов")
                 return session.current_question
             
-            await self.dm.save_answer(session.user_id, qid, text)
-            next_qid = self.qe.get_next_question_id(qid)
-            if next_qid:
-                await self.show_question(update, context, next_qid)
-                return self._state_for_q(next_qid)
-            else: return await self._complete(update, context, session)
+            if len(text) > max_length:
+                await update.message.reply_text(f"❌ Максимальная длина: {max_length} символов")
+                return session.current_question
+            
+            await self.data_manager.save_answer(session.user_id, current_q_id, text)
+            
+            next_num = session.current_question + 1
+            if next_num > 10:
+                return await self._complete_questionnaire(update, context, session)
+            
+            next_q_id = f"Q{next_num}"
+            await self.show_question(update, context, next_q_id)
+            return self._get_state_for_question(next_q_id)
         
         await update.message.reply_text("Пожалуйста, используйте кнопки для ответа.")
         return session.current_question
 
-    async def cancel_questionnaire(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """Отменить анкету"""
-        user_id = update.effective_user.id
-        session = await self.dm.get_session(user_id)
-        if session: await self.dm.update_status(user_id, SessionStatus.ABANDONED)
-        
-        keyboard = [[InlineKeyboardButton("🔄 Заново", callback_data="start_q1")], [InlineKeyboardButton("❌ Выйти", callback_data="exit")]]
-        await update.message.reply_text("❌ Анкета отменена. Начните заново в любое время.", reply_markup=InlineKeyboardMarkup(keyboard))
-        return ConversationHandler.END
 
-    def _state_for_q(self, qid: str) -> int:
-        qnum = int(qid[1:])
-        states = {1: ConversationState.DEMO_AGE.value, 2: ConversationState.DEMO_EDUCATION.value, 3: ConversationState.DEMO_CITY.value,
-                  4: ConversationState.PERSONALITY_MOTIVATION.value, 5: ConversationState.PERSONALITY_TYPE.value,
-                  6: ConversationState.PERSONALITY_RISK.value, 7: ConversationState.PERSONALITY_ENERGY.value}
-        return states.get(qnum, ConversationState.MAIN_MENU.value)
-
-
-# ============================================================================
-# SINGLETON + WRAPPER FUNCTIONS (правильная архитектура)
-# ============================================================================
-
-# Singleton instance
-_questionnaire_handler: Optional[QuestionnaireHandler] = None
-
-def _get_handler() -> QuestionnaireHandler:
-    """Получить или создать singleton-инстанс обработчика"""
-    global _questionnaire_handler
-    if _questionnaire_handler is None:
-        _questionnaire_handler = QuestionnaireHandler(
-            data_manager=global_data_manager,
-            openai_service=global_openai_service
-        )
-    return _questionnaire_handler
-
-
-# Standalone wrapper functions для импорта в bot.py
-async def start_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper: начать анкету"""
-    return await _get_handler().start_questionnaire(update, context)
-
-async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper: обработать callback"""
-    return await _get_handler().handle_callback(update, context)
-
-async def handle_question_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper: обработать текстовый ответ"""
-    return await _get_handler().handle_text_input(update, context)
-
-async def cancel_questionnaire(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Wrapper: отменить анкету"""
-    return await _get_handler().cancel_questionnaire(update, context)
-
-
-# Экспорт для импорта
-__all__ = [
-    'start_questionnaire',
-    'handle_callback_query',
-    'handle_question_answer',
-    'cancel_questionnaire',
-    'QuestionnaireHandler'
-]
+# Глобальный экземпляр
+questionnaire_handler = QuestionnaireHandler()
