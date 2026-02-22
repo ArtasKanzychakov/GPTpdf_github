@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 БИЗНЕС-НАВИГАТОР v7.0 - DEMO VERSION
-Главный файл запуска (FastAPI версия)
+Главный файл запуска (FastAPI + Webhooks)
 """
 import asyncio
 import os
@@ -11,7 +11,7 @@ import signal
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 # Добавляем путь к модулям
@@ -56,11 +56,17 @@ async def lifespan(app: FastAPI):
         bot = BusinessNavigatorBot(config)
         bot_instance = bot
         
-        # ЗАПУСК БОТА В ФОНОВОМ РЕЖИМЕ
-        logger.info("▶️ Запускаю бота в фоновом режиме...")
-        bot_task = asyncio.create_task(bot.start())
+        # ЗАПУСК БОТА (вебхук установится автоматически в _post_init)
+        logger.info("▶️ Запускаю бота...")
+        await bot.start()
         await asyncio.sleep(2)
         logger.info("✅ Бот успешно запущен")
+        
+        # Выводим URL для проверки
+        render_url = os.getenv("RENDER_EXTERNAL_URL", "")
+        if render_url:
+            logger.info(f"🌐 URL сервиса: {render_url}")
+            logger.info(f"🔗 Webhook URL: {render_url}/webhook")
         
         yield
         
@@ -119,6 +125,44 @@ async def status():
             "running": bot_instance.is_running if bot_instance else False
         }
     }
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    """
+    Endpoint для обработки вебхуков от Telegram.
+    Вызывается Telegram Bot API при новых сообщениях.
+    """
+    if not bot_instance or not bot_instance.is_running:
+        return JSONResponse(status_code=503, content={"status": "bot not ready"})
+    
+    try:
+        update_dict = await request.json()
+        success = await bot_instance.process_update(update_dict)
+        return {"status": "ok"} if success else JSONResponse(status_code=500, content={"status": "error"})
+    except Exception as e:
+        logger.error(f"❌ Ошибка webhook: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"status": "internal_error"})
+
+@app.get("/webhook-info")
+async def webhook_info():
+    """
+    Информация о текущем вебхуке (для отладки).
+    """
+    if not bot_instance:
+        return JSONResponse(status_code=503, content={"status": "bot not ready"})
+    
+    try:
+        info = await bot_instance.application.bot.get_webhook_info()
+        return {
+            "url": info.url,
+            "has_custom_certificate": info.has_custom_certificate,
+            "pending_update_count": info.pending_update_count,
+            "last_error_date": info.last_error_date,
+            "last_error_message": info.last_error_message,
+        }
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения info: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
 # Обработчики сигналов
 def signal_handler(signum, frame):
