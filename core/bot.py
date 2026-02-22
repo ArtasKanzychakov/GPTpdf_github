@@ -17,7 +17,6 @@ from telegram.ext import (
 
 logger = logging.getLogger(__name__)
 
-
 class BotStatus:
     """Статус работы бота"""
     def __init__(self):
@@ -25,7 +24,6 @@ class BotStatus:
         self.started_at = None
         self.total_users = 0
         self.active_sessions = 0
-
 
 class BusinessNavigatorBot:
     """Основной класс бота Бизнес-Навигатор"""
@@ -35,14 +33,12 @@ class BusinessNavigatorBot:
         self.application: Optional[Application] = None
         self._status = BotStatus()
         self._bot_task: Optional[asyncio.Task] = None
-        
         self._initialize_application()
     
     def _initialize_application(self) -> None:
         """Инициализация Telegram Application"""
         try:
             logger.info("🤖 Инициализация Telegram Application...")
-            
             self.application = (
                 ApplicationBuilder()
                 .token(self.config.telegram_token)
@@ -50,7 +46,6 @@ class BusinessNavigatorBot:
                 .post_shutdown(self._post_shutdown)
                 .build()
             )
-            
             self._setup_handlers()
             logger.info("✅ Telegram Application инициализирован")
         except Exception as e:
@@ -72,7 +67,6 @@ class BusinessNavigatorBot:
             status_command,
             questionnaire_command
         )
-        
         self.application.add_handler(CommandHandler("start", start_command))
         self.application.add_handler(CommandHandler("help", help_command))
         self.application.add_handler(CommandHandler("restart", restart_command))
@@ -122,14 +116,11 @@ class BusinessNavigatorBot:
         
         try:
             logger.info("▶️ Запуск бота...")
-            
             if not self.application:
                 return
-            
             await self.application.initialize()
             self._bot_task = asyncio.create_task(self._run_polling())
             self._status.is_running = True
-            
             logger.info("✅ Бот запущен")
         except Exception as e:
             logger.error(f"❌ Ошибка при запуске: {e}")
@@ -162,17 +153,14 @@ class BusinessNavigatorBot:
         
         try:
             logger.info("⏹️ Остановка бота...")
-            
             if self._bot_task and not self._bot_task.done():
                 self._bot_task.cancel()
                 try:
                     await self._bot_task
                 except asyncio.CancelledError:
                     pass
-            
             if self.application:
                 await self.application.stop()
-            
             self._status.is_running = False
             logger.info("✅ Бот остановлен")
         except Exception as e:
