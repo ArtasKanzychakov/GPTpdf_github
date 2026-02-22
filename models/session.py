@@ -97,29 +97,24 @@ class UserSession:
     updated_at: datetime = field(default_factory=datetime.now)
 
     def update_timestamp(self) -> None:
-        """Обновить временную метку"""
         self.updated_at = datetime.now()
 
     def add_answer(self, question_id: str, answer: Any) -> None:
-        """Добавить ответ на вопрос"""
         self.answers[question_id] = answer
         self.update_timestamp()
 
     def add_to_navigation(self, category: str, question_num: int) -> None:
-        """Добавить в историю навигации"""
         self.navigation_history.append((category, question_num))
         if len(self.navigation_history) > 20:
             self.navigation_history = self.navigation_history[-20:]
 
     def go_back(self) -> Optional[tuple]:
-        """Вернуться на предыдущий вопрос"""
         if len(self.navigation_history) > 1:
             self.navigation_history.pop()
             return self.navigation_history[-1]
         return None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Конвертировать в словарь"""
         return {
             "user_id": self.user_id,
             "status": self.status.value,
@@ -132,7 +127,6 @@ class UserSession:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "UserSession":
-        """Создать из словаря"""
         session = cls(
             user_id=data["user_id"],
             status=SessionStatus(data.get("status", "started")),
