@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Сервис OpenAI — DEMO заглушка (Production-ready структура)
+Сервис OpenAI - DEMO заглушка
 """
 import logging
 import asyncio
@@ -16,19 +16,17 @@ class OpenAIService:
     """Сервис OpenAI в режиме демо"""
 
     def __init__(self):
-        self.is_initialized: bool = False
-        self.demo_mode: bool = True
+        self.is_initialized = False
+        self.demo_mode = True
         logger.info("🤖 OpenAI сервис инициализирован (DEMO MODE)")
 
-    async def analyze_user_profile(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE, session
-    ) -> str:
+    async def analyze_user_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session) -> str:
         """Демо-анализ профиля"""
         await update.effective_message.reply_text(
             "⏳ *Анализирую ваши ответы...*\n"
             "_Бот работает в демонстрационном режиме._\n"
             "_В полной версии здесь будет ИИ-анализ._",
-            parse_mode="Markdown",
+            parse_mode="Markdown"
         )
         await asyncio.sleep(2)
         return self._get_demo_analysis(session)
@@ -44,7 +42,6 @@ class OpenAIService:
         return self._get_demo_plan(niche)
 
     def _get_demo_analysis(self, session) -> str:
-        """Демо-анализ"""
         return """
 🧠 *ДЕМО-АНАЛИЗ ПРОФИЛЯ*
 
@@ -63,7 +60,6 @@ class OpenAIService:
 """.strip()
 
     def _get_demo_niches(self) -> List[Dict[str, Any]]:
-        """Демо-ниши"""
         return [
             {
                 "id": "niche_1",
@@ -74,7 +70,7 @@ class OpenAIService:
                 "risk_level": 2,
                 "time_to_profit": "1-2 месяца",
                 "min_budget": 10000,
-                "success_rate": 0.8,
+                "success_rate": 0.8
             },
             {
                 "id": "niche_2",
@@ -85,7 +81,7 @@ class OpenAIService:
                 "risk_level": 3,
                 "time_to_profit": "3-4 месяца",
                 "min_budget": 25000,
-                "success_rate": 0.6,
+                "success_rate": 0.6
             },
             {
                 "id": "niche_3",
@@ -96,12 +92,11 @@ class OpenAIService:
                 "risk_level": 4,
                 "time_to_profit": "6-12 месяцев",
                 "min_budget": 50000,
-                "success_rate": 0.5,
-            },
+                "success_rate": 0.5
+            }
         ]
 
     def _get_demo_plan(self, niche: Dict) -> str:
-        """Демо-план"""
         return f"""
 📋 *ДЕМО-ПЛАН: {niche['name']}*
 
@@ -125,5 +120,4 @@ class OpenAIService:
 """.strip()
 
 
-# Глобальный экземпляр
 openai_service = OpenAIService()
