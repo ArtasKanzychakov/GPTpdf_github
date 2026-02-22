@@ -1,8 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Обработчики для анкетирования - DEMO VERSION
 """
 import logging
 import asyncio
+from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from models.session import UserSession, SessionStatus
@@ -57,7 +60,6 @@ class QuestionnaireHandler:
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or "Пользователь"
         
-        # Показать индикатор набора
         await self._show_typing(user_id, context, 1.0)
         
         session = await self.data_manager.get_session(user_id)
@@ -67,14 +69,13 @@ class QuestionnaireHandler:
         await self.data_manager.update_status(user_id, SessionStatus.IN_PROGRESS)
         
         welcome_text = f"""
-🎯 *БИЗНЕС-НАВИГАТОР v7.0 (DEMO)*
-
+🎯 БИЗНЕС-НАВИГАТОР v7.0 (DEMO)
 Привет, {user_name}! 👋
 
 Я помогу вам найти идеальную бизнес-нишу.
-Сейчас я задам `{10}` вопросов с разными типами ответов.
+Сейчас я задам `10` вопросов с разными типами ответов.
 
-📋 *Типы вопросов:*
+📋 Типы вопросов:
 • 🔘 Кнопки выбора
 • ☑️ Мультиселект
 • 🎚️ Слайдеры
@@ -82,11 +83,10 @@ class QuestionnaireHandler:
 • 📝 Текстовые ответы
 
 ⏱️ Время: 3-5 минут
-⚠️ _Бот в демонстрационном режиме_
+⚠️ Бот в демонстрационном режиме
 
 Готовы начать?
 """
-        
         keyboard = [
             [InlineKeyboardButton("✅ Начать анкету", callback_data="start_q1")],
             [InlineKeyboardButton("ℹ️ О боте", callback_data="about")]
@@ -104,7 +104,6 @@ class QuestionnaireHandler:
         """Показать вопрос пользователю"""
         user_id = update.effective_user.id
         
-        # Показать индикатор набора
         await self._show_typing(user_id, context, 0.8)
         
         query = update.callback_query if hasattr(update, 'callback_query') else None
@@ -122,7 +121,6 @@ class QuestionnaireHandler:
             logger.error(f"Вопрос {question_id} не найден")
             return
         
-        # Обновить навигацию
         category = question_data.get('category', 'start')
         question_num = int(question_id[1:])
         session.add_to_navigation(category, question_num)
@@ -130,7 +128,6 @@ class QuestionnaireHandler:
         session.current_category = category
         await self.data_manager.update_session(session)
         
-        # Форматировать текст
         category_emoji = self.category_emojis.get(category, '📝')
         question_text = question_data.get('text', '')
         
@@ -141,7 +138,6 @@ class QuestionnaireHandler:
             category_emoji=category_emoji
         )
         
-        # Создать клавиатуру
         keyboard = self._create_keyboard(question_data, session)
         
         if query:
@@ -290,7 +286,6 @@ class QuestionnaireHandler:
         elif question_type == 'confirmation':
             keyboard.append([InlineKeyboardButton("✅ Завершить анкету", callback_data="submit")])
         
-        # Кнопка назад
         if question_id != 'Q1':
             keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
         
@@ -310,7 +305,6 @@ class QuestionnaireHandler:
         
         callback_data = query.data
         
-        # Показать индикатор набора
         await self._show_typing(user_id, context, 0.5)
         
         if callback_data.startswith("start_q"):
@@ -528,7 +522,6 @@ class QuestionnaireHandler:
         else:
             return await self._proceed_to_next(update, context, session)
         
-        # Валидация
         validation = question_data.get('validation', {})
         if validation.get('sum_equals'):
             expected_sum = validation['sum_equals']
@@ -540,7 +533,6 @@ class QuestionnaireHandler:
         
         await self.data_manager.save_answer(session.user_id, current_q_id, final_answer)
         
-        # Очистить temp_data
         keys_to_clear = [k for k in session.temp_data.keys() if k.startswith(current_q_id)]
         for key in keys_to_clear:
             session.temp_data.pop(key, None)
@@ -592,7 +584,6 @@ class QuestionnaireHandler:
         """Запустить анализ ответов"""
         user_id = session.user_id
         
-        # Показать индикатор набора
         await self._show_typing(user_id, context, 2.0)
         
         loading_msg = await context.bot.send_message(
