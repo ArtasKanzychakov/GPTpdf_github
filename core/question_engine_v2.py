@@ -7,12 +7,10 @@ from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import logging
-
 from models.question_types import QuestionType, QuestionCategory
 from models.session import UserSession
 
 logger = logging.getLogger(__name__)
-
 
 class QuestionEngineV2:
     """Движок обработки вопросов анкеты v2.0"""
@@ -251,7 +249,7 @@ class QuestionEngineV2:
             row.append(InlineKeyboardButton("➖➖", callback_data="slider_dec2"))
             row.append(InlineKeyboardButton("➖", callback_data="slider_dec"))
         
-        row.append(InlineKeyboardButton(f"【 {current_value} 】", callback_data="info"))
+        row.append(InlineKeyboardButton(f"【{current_value}】", callback_data="info"))
         
         if current_value < max_val:
             row.append(InlineKeyboardButton("➕", callback_data="slider_inc"))
@@ -505,7 +503,7 @@ class QuestionEngineV2:
         
         if not current_field:
             # Начинаем с первого поля
-            first_field = list(demographics.keys())[0]
+            first_field = list(demographics.keys())[0] 
             current_field = first_field
         
         # Получаем данные текущего поля
