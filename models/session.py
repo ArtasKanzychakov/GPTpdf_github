@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Модели данных для сессий пользователей
 """
@@ -5,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from enum import Enum
+
 
 class SessionStatus(Enum):
     """Статусы сессии"""
@@ -14,6 +17,7 @@ class SessionStatus(Enum):
     ANALYSIS_GENERATED = "analysis_generated"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
+
 
 @dataclass
 class DemographicData:
@@ -33,6 +37,7 @@ class DemographicData:
             occupation=data.get("occupation"),
             income_level=data.get("income_level")
         )
+
 
 @dataclass
 class NicheDetails:
@@ -76,6 +81,7 @@ class NicheDetails:
             recommendations=data.get("recommendations", []),
             score=float(data.get("score", 0.0))
         )
+
 
 @dataclass
 class UserSession:
