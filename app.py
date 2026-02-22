@@ -54,9 +54,9 @@ async def lifespan(app: FastAPI):
         logger.info(f"🤖 OpenAI модель: {config.openai_model}")
         logger.info(f"📝 Вопросов загружено: {len(config.questions)}")
         
+        # ✅ ИСПРАВЛЕНО: DataManager не имеет метода initialize()
         from services.data_manager import data_manager
-        data_manager.initialize()
-        logger.info("💾 Менеджер данных инициализирован")
+        logger.info("💾 Менеджер данных готов (in-memory)")
         
         if config.openai_api_key:
             logger.info("🔍 OpenAI ключ найден - полный режим")
@@ -71,9 +71,10 @@ async def lifespan(app: FastAPI):
         application = bot.application
         
         logger.info("▶️ Запускаю бота в фоновом режиме...")
-        bot_task = asyncio.create_task(bot.start())
+        # ✅ FastAPI-совместимый запуск (не блокирует event loop)
+        await bot.start()
         
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         logger.info("✅ Бот успешно запущен в фоновом режиме")
         logger.info("🌐 FastAPI сервер готов принимать запросы")
         
@@ -103,7 +104,6 @@ app = FastAPI(
 
 @app.get("/")
 async def root():
-    """Корневой endpoint"""
     return {
         "app": "Business Navigator v7.0",
         "status": "running",
@@ -112,7 +112,6 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check для Render"""
     global bot_instance
     if bot_instance and bot_instance.is_running:
         return {"status": "healthy", "bot": "running"}
@@ -124,10 +123,8 @@ async def health_check():
 
 @app.get("/status")
 async def status():
-    """Подробный статус системы"""
     import psutil
     import datetime
-    
     return {
         "status": "operational",
         "timestamp": datetime.datetime.utcnow().isoformat(),
@@ -144,11 +141,9 @@ async def status():
 
 @app.post("/restart-bot")
 async def restart_bot():
-    """Перезапуск бота (только для админов)"""
     global bot_instance
     if not bot_instance:
         raise HTTPException(status_code=500, detail="Bot not initialized")
-    
     try:
         logger.info("🔄 Запрашивается перезапуск бота...")
         await bot_instance.stop()
@@ -161,7 +156,6 @@ async def restart_bot():
         raise HTTPException(status_code=500, detail=str(e))
 
 def signal_handler(signum, frame):
-    """Обработчик сигналов для graceful shutdown"""
     logger.info(f"📶 Получен сигнал {signum}, завершаю работу...")
     sys.exit(0)
 
