@@ -11,7 +11,6 @@ import signal
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
@@ -28,12 +27,10 @@ logger = logging.getLogger(__name__)
 # Глобальные переменные
 bot_instance = None
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом FastAPI приложения"""
     global bot_instance
-    
     logger.info("=" * 60)
     logger.info("🚀 ЗАПУСК БИЗНЕС-НАВИГАТОРА v7.0 (DEMO)")
     logger.info("=" * 60)
@@ -62,7 +59,6 @@ async def lifespan(app: FastAPI):
         # ЗАПУСК БОТА В ФОНОВОМ РЕЖИМЕ
         logger.info("▶️ Запускаю бота в фоновом режиме...")
         bot_task = asyncio.create_task(bot.start())
-        
         await asyncio.sleep(2)
         logger.info("✅ Бот успешно запущен")
         
@@ -71,7 +67,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.critical(f"❌ Ошибка при запуске: {e}", exc_info=True)
         raise
-    
     finally:
         logger.info("⏹️ Останавливаю бота...")
         if bot_instance:
@@ -80,7 +75,6 @@ async def lifespan(app: FastAPI):
                 logger.info("✅ Бот остановлен")
             except Exception as e:
                 logger.error(f"❌ Ошибка при остановке: {e}")
-
 
 # Создаем FastAPI приложение
 app = FastAPI(
@@ -91,7 +85,6 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-
 @app.get("/")
 async def root():
     """Корневой endpoint"""
@@ -100,7 +93,6 @@ async def root():
         "status": "running",
         "docs": "/docs"
     }
-
 
 @app.get("/health")
 async def health_check():
@@ -111,13 +103,11 @@ async def health_check():
     else:
         return JSONResponse(status_code=503, content={"status": "unhealthy", "bot": "stopped"})
 
-
 @app.get("/status")
 async def status():
     """Подробный статус системы"""
     import psutil
     import datetime
-    
     return {
         "status": "operational",
         "timestamp": datetime.datetime.utcnow().isoformat(),
@@ -130,24 +120,19 @@ async def status():
         }
     }
 
-
 # Обработчики сигналов
 def signal_handler(signum, frame):
     """Обработчик сигналов для graceful shutdown"""
     logger.info(f"📶 Получен сигнал {signum}")
     sys.exit(0)
 
-
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
-
 if __name__ == "__main__":
     import uvicorn
-    
     port = int(os.getenv("PORT", 10000))
     logger.info(f"🔧 Запуск на порту {port}")
-    
     uvicorn.run(
         app,
         host="0.0.0.0",
