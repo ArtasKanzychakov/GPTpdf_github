@@ -1,6 +1,19 @@
-"""Модели данных"""
-from .session import UserSession, SessionStatus
-from .enums import ConversationState, NicheCategory
-from .question_types import QuestionType
+"""
+Модели данных для Business Navigator
+"""
+from .session import UserSession, SessionStatus, DemographicData
+from .enums import ConversationState, PaymentStatus, NicheCategory, UserRole
+from .question_types import QuestionType, QuestionCategory, AnswerValidationRule
 
-__all__ = ['UserSession', 'SessionStatus', 'ConversationState', 'NicheCategory', 'QuestionType']
+__all__ = [
+    "UserSession",
+    "SessionStatus", 
+    "DemographicData",
+    "ConversationState",
+    "PaymentStatus",
+    "NicheCategory",
+    "UserRole",
+    "QuestionType",
+    "QuestionCategory",
+    "AnswerValidationRule"
+]
