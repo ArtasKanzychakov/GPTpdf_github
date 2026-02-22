@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
-
 class SessionStatus(Enum):
     """Статусы сессии"""
     STARTED = "started"
@@ -16,6 +15,67 @@ class SessionStatus(Enum):
     COMPLETED = "completed"
     ABANDONED = "abandoned"
 
+@dataclass
+class DemographicData:
+    """Демографические данные пользователя"""
+    age: Optional[int] = None
+    education: Optional[str] = None
+    city: Optional[str] = None
+    occupation: Optional[str] = None
+    income_level: Optional[str] = None
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DemographicData":
+        return cls(
+            age=data.get("age"),
+            education=data.get("education"),
+            city=data.get("city"),
+            occupation=data.get("occupation"),
+            income_level=data.get("income_level")
+        )
+
+@dataclass
+class NicheDetails:
+    """Детали бизнес-ниши"""
+    id: str
+    name: str
+    emoji: str = "📊"
+    category: str = "balanced"
+    description: str = ""
+    risk_level: int = 3
+    time_to_profit: str = "3-6 месяцев"
+    min_budget: int = 0
+    success_rate: float = 0.5
+    required_skills: List[str] = field(default_factory=list)
+    examples: List[str] = field(default_factory=list)
+    advantages: List[str] = field(default_factory=list)
+    risks: List[str] = field(default_factory=list)
+    recommendations: List[str] = field(default_factory=list)
+    score: float = 0.0
+    
+    def short_description(self) -> str:
+        desc = self.description[:50] + "..." if len(self.description) > 50 else self.description
+        return f"{self.emoji} {self.name} — {desc}"
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "NicheDetails":
+        return cls(
+            id=data.get("id", ""),
+            name=data.get("name", ""),
+            emoji=data.get("emoji", "📊"),
+            category=data.get("category", "balanced"),
+            description=data.get("description", ""),
+            risk_level=int(data.get("risk_level", 3)),
+            time_to_profit=data.get("time_to_profit", "3-6 месяцев"),
+            min_budget=int(data.get("min_budget", 0)),
+            success_rate=float(data.get("success_rate", 0.5)),
+            required_skills=data.get("required_skills", []),
+            examples=data.get("examples", []),
+            advantages=data.get("advantages", []),
+            risks=data.get("risks", []),
+            recommendations=data.get("recommendations", []),
+            score=float(data.get("score", 0.0))
+        )
 
 @dataclass
 class UserSession:
