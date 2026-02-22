@@ -85,52 +85,39 @@ class BusinessNavigatorBot:
         logger.info("✅ Обработчики настроены")
 
     async def _post_init(self, application: Application) -> None:
-        """Post-init — автоматическая установка вебхука"""
+        """Post-init — установка вебхука (включая DEMO)"""
         logger.info("🔄 Post-init выполнен")
         self._status.started_at = asyncio.get_event_loop().time()
-        if not self.config.demo_mode:
-            await self._setup_webhook()
-        else:
-            logger.info("⚠️ DEMO MODE — вебхук не устанавливается автоматически")
+        # Устанавливаем вебхук ВСЕГДА (даже в демо)
+        await self._setup_webhook()
 
     async def _setup_webhook(self) -> None:
         """Автоматическая настройка вебхука для Render"""
         try:
             webhook_base = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
             if not webhook_base:
-                logger.warning("⚠️ RENDER_EXTERNAL_URL не задан, вебхук не установлен")
+                logger.warning("⚠️ RENDER_EXTERNAL_URL не задан")
                 return
             self._webhook_url = f"{webhook_base}/webhook"
+            # Удаляем старый вебхук
             try:
                 await self.application.bot.delete_webhook()
-                logger.info("✅ Старый вебхук удалён")
             except Exception:
                 pass
+            # Устанавливаем новый
             await self.application.bot.set_webhook(
                 url=self._webhook_url,
                 allowed_updates=self.application.updater.ALLOWED_UPDATES,
                 drop_pending_updates=True,
             )
-            logger.info(f"✅ Вебхук автоматически установлен: {self._webhook_url}")
-            webhook_info = await self.application.bot.get_webhook_info()
-            if webhook_info.url == self._webhook_url:
-                logger.info("✅ Вебхук подтверждён Telegram API")
-            else:
-                logger.warning(f"⚠️ Вебхук не совпадает: {webhook_info.url}")
+            logger.info(f"✅ Вебхук установлен: {self._webhook_url}")
         except Exception as e:
             logger.error(f"❌ Ошибка установки вебхука: {e}", exc_info=True)
-            raise
 
     async def _post_shutdown(self, application: Application) -> None:
         """Post-shutdown"""
         logger.info("🔄 Post-shutdown выполнен")
         self._status.is_running = False
-        if not self.config.demo_mode:
-            try:
-                await self.application.bot.delete_webhook()
-                logger.info("✅ Вебхук удалён при остановке")
-            except Exception as e:
-                logger.warning(f"⚠️ Не удалось удалить вебхук: {e}")
 
     async def _error_handler(self, update: object, context) -> None:
         """Обработчик ошибок"""
