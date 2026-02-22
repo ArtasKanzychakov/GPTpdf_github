@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Основной модуль бота Бизнес-Навигатор — Production Version
+Основной модуль бота Бизнес-Навигатор — Production Version (Webhooks)
+Автоматическая установка вебхука при запуске
 """
 import asyncio
 import logging
+import os
 from typing import Optional
 from telegram.ext import (
     Application,
@@ -34,7 +36,7 @@ class BusinessNavigatorBot:
         self.config = config
         self.application: Optional[Application] = None
         self._status = BotStatus()
-        self._polling_task: Optional[asyncio.Task] = None
+        self._webhook_url: Optional[str] = None
         self._initialize_application()
 
     def _initialize_application(self) -> None:
@@ -89,14 +91,67 @@ class BusinessNavigatorBot:
         logger.info("✅ Обработчики настроены")
 
     async def _post_init(self, application: Application) -> None:
-        """Вызывается после инициализации бота"""
+        """Вызывается после инициализации бота — АВТОМАТИЧЕСКАЯ УСТАНОВКА ВЕБХУКА"""
         logger.info("🔄 Post-init выполнен")
         self._status.started_at = asyncio.get_event_loop().time()
+        
+        # Автоматическая установка вебхука (не в демо-режиме)
+        if not self.config.demo_mode:
+            await self._setup_webhook()
+        else:
+            logger.info("⚠️ DEMO MODE — вебхук не устанавливается")
+
+    async def _setup_webhook(self) -> None:
+        """Автоматическая настройка вебхука для Render"""
+        try:
+            # Получаем URL из переменной окружения Render
+            webhook_base = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
+            
+            if not webhook_base:
+                logger.warning("⚠️ RENDER_EXTERNAL_URL не задан, вебхук не установлен")
+                return
+            
+            self._webhook_url = f"{webhook_base}/webhook"
+            
+            # Удаляем старый вебхук (на всякий случай)
+            try:
+                await self.application.bot.delete_webhook()
+                logger.info("✅ Старый вебхук удалён")
+            except Exception:
+                pass
+            
+            # Устанавливаем новый вебхук
+            await self.application.bot.set_webhook(
+                url=self._webhook_url,
+                allowed_updates=self.application.updater.ALLOWED_UPDATES,
+                drop_pending_updates=True,
+            )
+            
+            logger.info(f"✅ Вебхук автоматически установлен: {self._webhook_url}")
+            
+            # Проверяем установку
+            webhook_info = await self.application.bot.get_webhook_info()
+            if webhook_info.url == self._webhook_url:
+                logger.info("✅ Вебхук подтверждён Telegram API")
+            else:
+                logger.warning(f"⚠️ Вебхук не совпадает: {webhook_info.url}")
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка установки вебхука: {e}", exc_info=True)
+            raise
 
     async def _post_shutdown(self, application: Application) -> None:
         """Вызывается после завершения работы бота"""
         logger.info("🔄 Post-shutdown выполнен")
         self._status.is_running = False
+        
+        # Удаляем вебхук при остановке (опционально, можно закомментировать)
+        if not self.config.demo_mode:
+            try:
+                await self.application.bot.delete_webhook()
+                logger.info("✅ Вебхук удалён при остановке")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось удалить вебхук: {e}")
 
     async def _error_handler(self, update: object, context) -> None:
         """Обработчик ошибок"""
@@ -111,7 +166,7 @@ class BusinessNavigatorBot:
             logger.error(f"❌ Не удалось отправить сообщение об ошибке: {e}")
 
     async def start(self) -> None:
-        """Запуск бота в фоновом режиме (внутри существующего event loop)"""
+        """Запуск бота (для webhooks — только инициализация)"""
         if self._status.is_running:
             return
 
@@ -120,46 +175,17 @@ class BusinessNavigatorBot:
             if not self.application:
                 return
 
-            # Инициализируем приложение (не запускаем polling ещё)
+            # Инициализируем приложение
             await self.application.initialize()
             await self.application.start()
-
-            # Запускаем polling как фоновую задачу в текущем event loop
-            self._polling_task = asyncio.create_task(self._polling_loop())
+            
             self._status.is_running = True
-            logger.info("✅ Бот запущен")
+            logger.info("✅ Бот запущен (webhook mode)")
 
         except Exception as e:
             logger.error(f"❌ Ошибка при запуске: {e}", exc_info=True)
             self._status.is_running = False
             raise
-
-    async def _polling_loop(self) -> None:
-        """
-        Фоновый цикл получения обновлений.
-        Работает внутри существующего event loop FastAPI.
-        """
-        try:
-            logger.info("📡 Запуск polling loop...")
-            while self._status.is_running:
-                try:
-                    # Получаем обновления вручную
-                    await self.application.updater.fetch_updates()
-                except Exception as e:
-                    logger.error(f"⚠️ Ошибка при получении обновлений: {e}")
-                # Небольшая пауза чтобы не нагружать API
-                await asyncio.sleep(0.5)
-        except asyncio.CancelledError:
-            logger.info("⏹️ Polling loop отменён")
-        except Exception as e:
-            logger.error(f"❌ Критическая ошибка в polling loop: {e}", exc_info=True)
-            raise
-        finally:
-            # Корректная остановка
-            if self.application:
-                await self.application.stop()
-                await self.application.shutdown()
-            logger.info("✅ Polling loop завершён")
 
     async def stop(self) -> None:
         """Остановка бота"""
@@ -170,16 +196,7 @@ class BusinessNavigatorBot:
             logger.info("⏹️ Остановка бота...")
             self._status.is_running = False
 
-            # Отменяем polling task
-            if self._polling_task and not self._polling_task.done():
-                self._polling_task.cancel()
-                try:
-                    await self._polling_task
-                except asyncio.CancelledError:
-                    pass
-
-            # Останавливаем application (если ещё не остановлен в _polling_loop)
-            if self.application and self.application.running:
+            if self.application:
                 await self.application.stop()
                 await self.application.shutdown()
 
@@ -188,7 +205,29 @@ class BusinessNavigatorBot:
             logger.error(f"❌ Ошибка при остановке: {e}", exc_info=True)
             raise
 
+    async def process_update(self, update_dict: dict) -> bool:
+        """
+        Обработка входящего обновления от вебхука.
+        Вызывается из FastAPI endpoint /webhook
+        """
+        if not self.application or not self._status.is_running:
+            return False
+        
+        try:
+            from telegram import Update
+            update = Update.de_json(update_dict, self.application.bot)
+            await self.application.process_update(update)
+            return True
+        except Exception as e:
+            logger.error(f"❌ Ошибка обработки обновления: {e}", exc_info=True)
+            return False
+
     @property
     def is_running(self) -> bool:
         """Статус работы бота"""
         return self._status.is_running
+
+    @property
+    def webhook_url(self) -> Optional[str]:
+        """URL вебхука"""
+        return self._webhook_url
