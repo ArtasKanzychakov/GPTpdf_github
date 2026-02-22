@@ -9,7 +9,6 @@ from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
 
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
@@ -17,7 +16,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     welcome_text = f"""
 👋 Привет, {user_name}!
-
 Добро пожаловать в *Бизнес-Навигатор v7.0* 🚀
 
 ⚠️ *DEMO MODE*
@@ -36,7 +34,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🚀 *Начнём?*
 Нажмите /questionnaire или кнопку ниже👇
 """
-    
     keyboard = [
         [InlineKeyboardButton("📝 Начать анкету", callback_data="start_questionnaire")],
         [InlineKeyboardButton("ℹ️ Помощь", callback_data="help_info")]
@@ -47,7 +44,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
@@ -75,9 +71,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📞 *Поддержка:*
 По вопросам обращайтесь к разработчику.
 """
-    
     await update.message.reply_text(text=help_text, parse_mode="Markdown")
-
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /status"""
@@ -94,15 +88,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     status_text = f"""
 👤 *ВАШ ПРОФИЛЬ*
-
 🆔 ID: `{session.user_id}`
 📅 Создана: `{session.created_at.strftime('%d.%m.%Y %H:%M')}`
 🔄 Статус: `{'✅ Завершено' if session.status.value == 'completed' else '⏳ В процессе'}`
 📝 Прогресс: {UIComponents.create_progress_bar(len(session.answers), 10)}
-
 📊 *Ответов:* `{len(session.answers)}/10`
 """
-    
     keyboard = [
         [InlineKeyboardButton("▶️ Продолжить", callback_data="continue_questionnaire")],
         [InlineKeyboardButton("🔄 Начать заново", callback_data="restart_questionnaire")]
@@ -113,7 +104,6 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
 
 async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /restart"""
@@ -131,12 +121,10 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     restart_text = """
 🔄 *Анкета сброшена!*
-
 Вы можете начать заново в любое время.
 
 ⚠️ _Бот в демонстрационном режиме_
 """
-    
     keyboard = [
         [InlineKeyboardButton("📝 Начать анкету", callback_data="start_q1")]
     ]
@@ -147,12 +135,10 @@ async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-
 async def questionnaire_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /questionnaire"""
     from handlers.questionnaire import questionnaire_handler
     await questionnaire_handler.start_questionnaire(update, context)
-
 
 __all__ = [
     'start_command',
