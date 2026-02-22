@@ -16,5 +16,5 @@ __all__ = [
     "UserRole",
     "QuestionType",
     "QuestionCategory",
-    "AnswerValidationRule",
+    "AnswerValidationRule"
 ]
