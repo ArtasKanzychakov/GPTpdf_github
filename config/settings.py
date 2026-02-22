@@ -47,7 +47,7 @@ class BotConfig:
         self.questions = [
             {
                 "id": "Q1",
-                "text": "👋 Привет! Давайте познакомимся.\n\nКак вас зовут?",
+                "text": "👋 Привет! Давайте познакомимся.\nКак вас зовут?",
                 "type": "text",
                 "category": "start",
                 "validation": {"min_length": 2, "max_length": 50, "required": True}
