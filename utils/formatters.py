@@ -1,3 +1,6 @@
+# ... в начале файла ...
+from models.session import NicheDetails  # Было: from models.enums import NicheDetails
+# ... остальной код без изменений ...
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
