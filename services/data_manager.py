@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
-logger = logging.getLogger(__name__)  # Было: logging.getLogger(name)
+logger = logging.getLogger(__name__)
 
 
 class DataManager:
@@ -20,28 +20,22 @@ class DataManager:
     async def get_session(self, user_id: int):
         """Получить сессию пользователя"""
         from models.session import UserSession
-
         session = self.sessions.get(user_id)
-
         if not session:
             session = UserSession(user_id=user_id)
-            self.sessions[user_id] = session  # Было: self.sess ions
-
+            self.sessions[user_id] = session
         return session
 
     async def create_session(self, user_id: int):
         """Создать новую сессию"""
         from models.session import UserSession, SessionStatus
-
         session = UserSession(
             user_id=user_id,
             status=SessionStatus.STARTED,
             current_question=1,
         )
-
         self.sessions[user_id] = session
         logger.info(f"✅ Создана сессия для пользователя {user_id}")
-
         return session
 
     async def update_session(self, session) -> bool:
@@ -57,13 +51,11 @@ class DataManager:
     async def save_answer(self, user_id: int, question_id: str, answer: any) -> bool:
         """Сохранить ответ пользователя"""
         session = await self.get_session(user_id)
-
         if not session:
             return False
-
         try:
             session.add_answer(question_id, answer)
-            await self.update_session(session)  # Было: self.updat e_session
+            await self.update_session(session)
             logger.info(f"✅ Ответ сохранен: user={user_id}, question={question_id}")
             return True
         except Exception as e:
@@ -73,13 +65,11 @@ class DataManager:
     async def update_temp_data(self, user_id: int, key: str, value: any) -> bool:
         """Обновить временные данные сессии"""
         session = await self.get_session(user_id)
-
         if not session:
             return False
-
         try:
             session.temp_data[key] = value
-            await self.update_session(session)  # Было: self.update_session (session)
+            await self.update_session(session)
             return True
         except Exception as e:
             logger.error(f"Ошибка обновления temp_data: {e}")
@@ -88,13 +78,11 @@ class DataManager:
     async def update_status(self, user_id: int, status) -> bool:
         """Обновить статус сессии"""
         session = await self.get_session(user_id)
-
         if not session:
             return False
-
         try:
             session.status = status
-            await self.update_session(session)  # Было: self.update_session(sessio n)
+            await self.update_session(session)
             return True
         except Exception as e:
             logger.error(f"Ошибка обновления статуса: {e}")
@@ -104,21 +92,16 @@ class DataManager:
         """Очистить старые сессии"""
         cutoff_date = datetime.now() - timedelta(days=days)
         deleted = 0
-
         user_ids_to_delete = []
         for user_id, session in self.sessions.items():
-            if session.updated_at < cutoff_date:  # Было: session.upd ated_at
+            if session.updated_at < cutoff_date:
                 user_ids_to_delete.append(user_id)
-
         for user_id in user_ids_to_delete:
             del self.sessions[user_id]
             deleted += 1
-
-        if deleted > 0:  # Было: if delete d > 0:
+        if deleted > 0:
             logger.info(f"🧹 Очищено {deleted} старых сессий")
-
         return deleted
 
 
-# Глобальный экземпляр
 data_manager = DataManager()
