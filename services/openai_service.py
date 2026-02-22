@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
 
+
 class OpenAIService:
     """Сервис OpenAI в режиме демо"""
     
@@ -22,13 +23,12 @@ class OpenAIService:
     async def analyze_user_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE, session) -> str:
         """Демо-анализ профиля"""
         await update.effective_message.reply_text(
-            "⏳ *Анализирую ваши ответы...*\n\n"
+            "⏳ *Анализирую ваши ответы...*\n"
             "_Бот работает в демонстрационном режиме._\n"
             "_В полной версии здесь будет ИИ-анализ._",
             parse_mode='Markdown'
         )
         await asyncio.sleep(2)
-        
         return self._get_demo_analysis(session)
     
     async def generate_niches(self, session) -> List[Dict[str, Any]]:
@@ -58,7 +58,7 @@ class OpenAIService:
 
 ⚠️ *Это демонстрационный режим*
 В полной версии вы получите детальный ИИ-анализ на основе всех ответов.
-        """.strip()
+""".strip()
     
     def _get_demo_niches(self) -> List[Dict[str, Any]]:
         """Демо-ниши"""
@@ -120,7 +120,8 @@ class OpenAIService:
 
 ⚠️ *Это демонстрационный план*
 В полной версии вы получите персонализированный план на 90 дней.
-        """.strip()
+""".strip()
+
 
 # Глобальный экземпляр
 openai_service = OpenAIService()
