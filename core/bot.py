@@ -15,7 +15,6 @@ from telegram.ext import (
     MessageHandler,
     CallbackQueryHandler,
     filters,
-    ConversationHandler
 )
 from config.settings import BotConfig
 from handlers.commands import (
@@ -51,7 +50,6 @@ class BusinessNavigatorBot:
         self.config = config
         self.application: Optional[Application] = None
         self._status = BotStatus()
-        self._polling_task: Optional[asyncio.Task] = None
         self._initialize_application()
 
     def _initialize_application(self) -> None:
@@ -114,18 +112,15 @@ class BusinessNavigatorBot:
         """Вызывается после завершения работы бота"""
         logger.info("🔄 Post-shutdown выполнен")
         self._status.is_running = False
-        
         try:
-            if data_manager:
-                await data_manager.cleanup_old_sessions(days=1)
-                logger.info("🧹 Очистка старых сессий выполнена")
+            await data_manager.cleanup_old_sessions(days=1)
+            logger.info("🧹 Очистка старых сессий выполнена")
         except Exception as e:
             logger.error(f"❌ Ошибка при очистке сессий: {e}")
 
     async def _error_handler(self, update: object, context) -> None:
         """Обработчик ошибок"""
         logger.error(f"❌ Ошибка при обработке обновления: {context.error}")
-        
         try:
             if update and hasattr(update, 'effective_chat'):
                 await context.bot.send_message(
@@ -136,7 +131,7 @@ class BusinessNavigatorBot:
             logger.error(f"❌ Не удалось отправить сообщение об ошибке: {e}")
 
     async def start(self) -> None:
-        """Запуск бота в фоновом режиме (FastAPI-совместимый)"""
+        """Запуск бота (FastAPI-совместимый — НЕ блокирует event loop)"""
         if self._status.is_running:
             logger.warning("⚠️ Бот уже запущен")
             return
@@ -144,51 +139,31 @@ class BusinessNavigatorBot:
         try:
             logger.info("▶️ Запуск бота в фоновом режиме...")
             
-            if not self.application:
-                logger.error("❌ Application не инициализирован")
+            if not self.application or not self.application.updater:
+                logger.error("❌ Application или Updater не инициализирован")
                 return
             
-            # 🔄 ВАЖНО: Для FastAPI используем только updater.start_polling()
-            # НЕ вызываем application.initialize()/start()/run_polling() вручную
-            # потому что FastAPI уже управляет event loop
-            
-            # Запускаем updater в фоновом режиме
+            # ✅ КЛЮЧЕВОЕ: Используем updater.start_polling() — НЕ блокирует loop
             self.application.updater.start_polling(
                 poll_interval=0.5,
                 timeout=10,
                 drop_pending_updates=True
             )
             
-            # Запускаем фоновую задачу для мониторинга
-            self._polling_task = asyncio.create_task(self._monitor_polling())
-            
             self._status.is_running = True
             self._status.total_users = len(data_manager.sessions)
             self._status.active_sessions = sum(
-                1 for s in data_manager.sessions.values() if s.is_active
+                1 for s in data_manager.sessions.values() if getattr(s, 'is_active', True)
             )
             
-            logger.info("✅ Бот запущен в фоновом режиме (FastAPI-совместимый)")
-            logger.info(f"📊 Пользователей в базе: {self._status.total_users}")
+            logger.info("✅ Бот запущен (FastAPI-совместимый)")
+            logger.info(f"📊 Пользователей: {self._status.total_users}")
             logger.info(f"📊 Активных сессий: {self._status.active_sessions}")
             
         except Exception as e:
             logger.error(f"❌ Ошибка при запуске бота: {e}", exc_info=True)
             self._status.is_running = False
             raise
-
-    async def _monitor_polling(self) -> None:
-        """Фоновая задача для мониторинга polling (не блокирует loop)"""
-        try:
-            logger.info("📡 Polling запущен в фоновом режиме...")
-            # Просто держим задачу активной — polling работает через updater
-            while self._status.is_running:
-                await asyncio.sleep(60)  # Проверка каждую минуту
-                logger.debug("🔄 Polling активен...")
-        except asyncio.CancelledError:
-            logger.info("⏹️ Мониторинг polling отменен")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в мониторинге polling: {e}")
 
     async def stop(self) -> None:
         """Остановка бота (FastAPI-совместимая)"""
@@ -200,19 +175,11 @@ class BusinessNavigatorBot:
             logger.info("⏹️ Остановка бота...")
             self._status.is_running = False
             
-            # Отменяем задачу мониторинга
-            if self._polling_task and not self._polling_task.done():
-                self._polling_task.cancel()
-                try:
-                    await self._polling_task
-                except asyncio.CancelledError:
-                    pass
-            
-            # 🔄 ВАЖНО: Останавливаем только updater, не application
-            # потому что application управляется FastAPI lifespan
+            # ✅ Останавливаем только updater (не application — им управляет FastAPI)
             if self.application and self.application.updater:
                 await self.application.updater.stop()
-                logger.info("✅ Updater остановлен")
+                await self.application.updater.shutdown()
+                logger.info("✅ Updater остановлен и завершён")
             
             logger.info("✅ Бот полностью остановлен")
             
@@ -221,24 +188,13 @@ class BusinessNavigatorBot:
             raise
 
     def get_status(self) -> Dict[str, Any]:
-        """Получение текущего статуса бота"""
         return {
             "is_running": self._status.is_running,
             "started_at": self._status.started_at,
             "total_users": self._status.total_users,
             "active_sessions": self._status.active_sessions,
-            "config": {
-                "bot_language": self.config.bot_language,
-                "questions_loaded": len(self.config.questions)
-            }
         }
 
     @property
     def is_running(self) -> bool:
-        """Статус работы бота (только чтение)"""
         return self._status.is_running
-
-    @property
-    def polling_task(self):
-        """Задача мониторинга (только чтение)"""
-        return self._polling_task
