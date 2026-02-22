@@ -8,5 +8,5 @@ __all__ = [
     "log_info",
     "log_warning",
     "log_error",
-    "log_debug",
+    "log_debug"
 ]
