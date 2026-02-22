@@ -4,46 +4,33 @@
 Конфигурационные настройки бота - DEMO VERSION
 """
 import os
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Dict, Any, List, Optional
+
 
 @dataclass
 class BotConfig:
     """Конфигурация бота"""
-    # Токены и ключи
-    telegram_token: str = field(default_factory=lambda: os.getenv('TELEGRAM_BOT_TOKEN', ''))
-    openai_api_key: str = field(default_factory=lambda: os.getenv('OPENAI_API_KEY', ''))
-    
-    # Настройки сервера
-    host: str = field(default_factory=lambda: os.getenv('HOST', '0.0.0.0'))
-    port: int = field(default_factory=lambda: int(os.getenv('PORT', '10000')))
-    
-    # Режим работы
-    demo_mode: bool = field(default_factory=lambda: os.getenv('DEMO_MODE', 'true').lower() == 'true')
-    
-    # Настройки OpenAI (не используются в демо)
-    openai_model: str = field(default_factory=lambda: os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo'))
+    telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
+    host: str = field(default_factory=lambda: os.getenv("HOST", "0.0.0.0"))
+    port: int = field(default_factory=lambda: int(os.getenv("PORT", "10000")))
+    demo_mode: bool = field(default_factory=lambda: os.getenv("DEMO_MODE", "true").lower() == "true")
+    openai_model: str = field(default_factory=lambda: os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"))
     openai_temperature: float = 0.7
     openai_max_tokens: int = 1000
-    
-    # Настройки бота
-    bot_language: str = 'ru'
-    max_questions: int = 10  # Сокращено для демо
-    
-    # Данные вопросов
+    bot_language: str = "ru"
+    max_questions: int = 10
+
     questions: List[Dict[str, Any]] = field(default_factory=list)
     question_categories: Dict[str, str] = field(default_factory=dict)
-    
+
     def __post_init__(self):
-        """Загрузка вопросов после инициализации"""
         print("🔄 Загрузка конфигурации бота (DEMO MODE)...")
         self._create_demo_questions()
         print(f"✅ Загружено {len(self.questions)} демонстрационных вопросов")
-    
+
     def _create_demo_questions(self):
-        """Создать демонстрационные вопросы с разными типами UI"""
         self.questions = [
             {
                 "id": "Q1",
@@ -154,7 +141,6 @@ class BotConfig:
                 "category": "finish"
             }
         ]
-        
         self.question_categories = {
             "start": "👋 Знакомство",
             "demographic": "📊 О вас",
@@ -167,17 +153,15 @@ class BotConfig:
             "dream": "📝 Мечта",
             "finish": "✅ Завершение"
         }
-    
+
     def get_question_by_id(self, question_id: str) -> Optional[Dict[str, Any]]:
-        """Получить вопрос по ID"""
         for question in self.questions:
-            if question.get('id') == question_id:
+            if question.get("id") == question_id:
                 return question
         return None
-    
+
     def get_total_questions(self) -> int:
-        """Получить общее количество вопросов"""
         return len(self.questions)
 
-# Глобальный экземпляр
+
 config = BotConfig()
