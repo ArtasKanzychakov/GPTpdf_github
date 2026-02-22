@@ -18,3 +18,8 @@ services:
         value: 10000
       - key: DEMO_MODE
         value: true
+      - key: RENDER_EXTERNAL_URL
+        fromService:
+          name: business-navigator-demo
+          type: web
+          property: host
