@@ -27,7 +27,7 @@ class DemographicData:
     city: Optional[str] = None
     occupation: Optional[str] = None
     income_level: Optional[str] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DemographicData":
         return cls(
@@ -35,7 +35,7 @@ class DemographicData:
             education=data.get("education"),
             city=data.get("city"),
             occupation=data.get("occupation"),
-            income_level=data.get("income_level")
+            income_level=data.get("income_level"),
         )
 
 
@@ -57,11 +57,11 @@ class NicheDetails:
     risks: List[str] = field(default_factory=list)
     recommendations: List[str] = field(default_factory=list)
     score: float = 0.0
-    
+
     def short_description(self) -> str:
         desc = self.description[:50] + "..." if len(self.description) > 50 else self.description
         return f"{self.emoji} {self.name} — {desc}"
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "NicheDetails":
         return cls(
@@ -79,7 +79,7 @@ class NicheDetails:
             advantages=data.get("advantages", []),
             risks=data.get("risks", []),
             recommendations=data.get("recommendations", []),
-            score=float(data.get("score", 0.0))
+            score=float(data.get("score", 0.0)),
         )
 
 
@@ -95,29 +95,29 @@ class UserSession:
     navigation_history: List[tuple] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
-    
-    def update_timestamp(self):
+
+    def update_timestamp(self) -> None:
         """Обновить временную метку"""
         self.updated_at = datetime.now()
-    
-    def add_answer(self, question_id: str, answer: Any):
+
+    def add_answer(self, question_id: str, answer: Any) -> None:
         """Добавить ответ на вопрос"""
         self.answers[question_id] = answer
         self.update_timestamp()
-    
-    def add_to_navigation(self, category: str, question_num: int):
+
+    def add_to_navigation(self, category: str, question_num: int) -> None:
         """Добавить в историю навигации"""
         self.navigation_history.append((category, question_num))
         if len(self.navigation_history) > 20:
             self.navigation_history = self.navigation_history[-20:]
-    
+
     def go_back(self) -> Optional[tuple]:
         """Вернуться на предыдущий вопрос"""
         if len(self.navigation_history) > 1:
             self.navigation_history.pop()
             return self.navigation_history[-1]
         return None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Конвертировать в словарь"""
         return {
@@ -127,9 +127,9 @@ class UserSession:
             "answers": self.answers,
             "temp_data": self.temp_data,
             "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat()
+            "updated_at": self.updated_at.isoformat(),
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "UserSession":
         """Создать из словаря"""
