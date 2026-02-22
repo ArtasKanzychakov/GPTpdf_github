@@ -7,7 +7,7 @@ from .question_types import QuestionType, QuestionCategory, AnswerValidationRule
 
 __all__ = [
     "UserSession",
-    "SessionStatus", 
+    "SessionStatus",
     "DemographicData",
     "NicheDetails",
     "ConversationState",
