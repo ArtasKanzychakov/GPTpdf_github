@@ -1,16 +1,16 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Типы вопросов для анкеты Business Navigator v7.0
 """
 from enum import Enum
 
+
 class QuestionType(Enum):
     """Типы вопросов в анкете"""
-    # Простые типы
     TEXT = "text"
     CHOICE = "choice"
     MULTIPLE_CHOICE = "multiple_choice"
-    
-    # Интерактивные типы (новые)
     QUICK_BUTTONS = "quick_buttons"
     MULTI_SELECT = "multi_select"
     SCENARIO_TEST = "scenario_test"
@@ -23,6 +23,7 @@ class QuestionType(Enum):
     FLOW_EXPERIENCE = "flow_experience"
     CLIENT_PORTRAIT = "client_portrait"
 
+
 class QuestionCategory(Enum):
     """Категории вопросов"""
     DEMOGRAPHIC = "demographic"
@@ -30,6 +31,7 @@ class QuestionCategory(Enum):
     SKILLS = "skills"
     VALUES = "values"
     RESOURCES = "resources"
+
 
 class AnswerValidationRule(Enum):
     """Правила валидации ответов"""
