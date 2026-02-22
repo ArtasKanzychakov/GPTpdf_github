@@ -1,15 +1,15 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Перечисления для Business Navigator
 """
 from enum import Enum
 
+
 class ConversationState(Enum):
     """Состояния диалога с ботом"""
-    # Начальные состояния
     START = "start"
     MAIN_MENU = "main_menu"
-    
-    # Демо вопросы (Q1-Q10)
     DEMO_AGE = "demo_age"
     DEMO_EDUCATION = "demo_education"
     DEMO_CITY = "demo_city"
@@ -19,15 +19,12 @@ class ConversationState(Enum):
     PERSONALITY_ENERGY = "personality_energy"
     PERSONALITY_FEARS = "personality_fears"
     SKILLS_COGNITIVE = "skills_cognitive"
-    
-    # Анализ и результаты
     PROCESSING = "processing"
     SHOW_ANALYSIS = "show_analysis"
     SHOW_NICHES = "show_niches"
     SELECT_NICHE = "select_niche"
-    
-    # Завершение
     COMPLETED = "completed"
+
 
 class PaymentStatus(Enum):
     """Статусы оплаты"""
@@ -37,6 +34,7 @@ class PaymentStatus(Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+
 class NicheCategory(Enum):
     """Категории ниш"""
     QUICK_START = "quick_start"
@@ -44,6 +42,7 @@ class NicheCategory(Enum):
     LONG_TERM = "long_term"
     RISKY = "risky"
     HIDDEN = "hidden"
+
 
 class UserRole(Enum):
     """Роли пользователей"""
